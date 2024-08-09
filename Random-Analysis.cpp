@@ -1,4 +1,4 @@
-// Picks.cpp : Defines the entry point for the console application.
+// Analyse.cpp : Defines the entry point for the console application.
 //
 
 #include <iostream>
@@ -20,8 +20,8 @@ const int DrawRange = 49;
 const int DRAW_SIZE = 7;
 const int SeedPool = 500;
 char PrimeNumbers[15] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
-typedef char Card[DRAW_SIZE];
-bool Debug=true;
+typedef int Card[DRAW_SIZE];
+bool debug=false;
 
 struct DrawStatisticList{
 
@@ -55,28 +55,38 @@ struct OrdinalNodes{
 	OrdinalNodes *Previous; 
 };
 
-class Picks
+struct Config {
+    string combinationCollectionFile;
+    string drawHistoryFile;
+    bool debugMode;
+
+    Config() : combinationCollectionFile("./combinationCollectionFile.dat"),
+               drawHistoryFile("./new_draw_order.csv"),
+               debugMode(false) {}
+};
+
+class Analyse
 {
 public:
-	void DisplayDrawStatistics();
-	void DisplayOrdinalLists();
-	void Initialize();
-	void SortOrdinalLists();
-	void DrawEngine();
-	void CreateCombinations();
-	void CalculateOrdinalEvent(int,OrdinalNodes*&);
+	void display_draw_statistics();
+	void display_ordinal_lists();
+	void init_all();
+	void sort_ordinal_lists();
+	void analyse_all_draws();
+	void create_all_combinations();
+	void calculate_ordinal_event(int,OrdinalNodes*&);
 	void InitialStatisticalBase();
-	bool CombinationHasPrimeNumber(Card);
-	bool ValidateDrawCombination(Card);
+	bool prime_number_check(Card);
+	bool validate_draw_combination(Card);
 	void Print();
 	// bool LoadCombinationsList();
-	void CalculateDrawEvent(DrawStatisticList*&);
+	void calculate_draw_event(DrawStatisticList*&);
 	void Picker();
-	void SortDrawNumbersAverage();
-	void SortOrdinalAverage(OrdinalNodes*&);
-	void FlagClear(OrdinalNodes*&);
-	void InitOrdinalList(OrdinalList&);
-
+	void sort_draws_average();
+	void sort_ordinal_average(OrdinalNodes*&);
+	void clear_boolean_flags(OrdinalNodes*&);
+	void init_ordinal_list(OrdinalList&);
+	bool load_config(const string&, Config&);
 	// Each OrdinalList is statistically represented once the lists are seeded.
 
 
@@ -93,16 +103,17 @@ public:
 	OrdinalNodes *OrdinalNodesStart;
 	Card LastDraw;
 	ValidCombinationList *ValidCombinationsStart;
-    char DebugMode,PerformAnalysis,UseRootData;
+    char PerformAnalysis,UseRootData;
 	int DrawHistoryTotal;
 	int total_picks;
-	int TotalNumbersDrawn;
-	int TotalValidCombinationCards;
-	char DrawHistoryFile[50];
-	char CombinationCollectionFile[50];
+	int totalNumbersDrawn;
+	int totalValidCombinationCards;
+	char drawHistoryFile[50];
+	char combinationCollectionFile[50];
+	bool debugMode;
 };
 
-void Picks::Initialize()
+void Analyse::init_all()
 {
 	DrawNumbersStart = new DrawStatisticList;
 	DrawStatisticList *currentDrawNumber;
@@ -126,20 +137,20 @@ void Picks::Initialize()
 		currentDrawNumber = currentDrawNumber->Next;
 	}while(ballValue < 49);
 
-	TotalValidCombinationCards = 0;
+	totalValidCombinationCards = 0;
 
 	//create the draw history list from file.
 
 	OrdinalNodesStart = new OrdinalNodes;
-	InitOrdinalList(OrdinalNodesStart->ListNode);
+	init_ordinal_list(OrdinalNodesStart->ListNode);
 	OrdinalNodesStart->Previous = NULL;
 	OrdinalNodesStart->Next = NULL;
 
-	TotalNumbersDrawn = 0;
-
+	totalNumbersDrawn = 0;
+	debugMode = true;
 	
 }
-void Picks::DisplayDrawStatistics() 
+void Analyse::display_draw_statistics() 
 {
     std::cout << "Draw Statistics (sorted by average):" << std::endl;
     for (const auto* stat : drawStatistics) {
@@ -150,7 +161,7 @@ void Picks::DisplayDrawStatistics()
                   << " Last Drawn: " << stat->LastDrawn << std::endl;
     }
 }
-void Picks::DisplayOrdinalLists() {
+void Analyse::display_ordinal_lists() {
 	OrdinalNodes* currentOrdinal;
 	currentOrdinal = OrdinalNodesStart;
 	int OrdinalLevel = 1;
@@ -173,9 +184,8 @@ void Picks::DisplayOrdinalLists() {
 	}
 
 }
-void Picks::SortDrawNumbersAverage()
+void Analyse::sort_draws_average()
 {
-
     bool swapped;
     DrawStatisticList *ptr1;
     DrawStatisticList *lptr = nullptr;
@@ -199,7 +209,7 @@ void Picks::SortDrawNumbersAverage()
         lptr = ptr1;
     } while (swapped);
 }
-void Picks::SortOrdinalAverage(OrdinalNodes*& Head)
+void Analyse::sort_ordinal_average(OrdinalNodes*& Head)
 {
     if (Head == nullptr) return;
 
@@ -225,46 +235,47 @@ void Picks::SortOrdinalAverage(OrdinalNodes*& Head)
         lptr = ptr1;
     } while (swapped);
 }
-
-void Picks::DrawEngine()
+void Analyse::analyse_all_draws()
 {
 	DrawStatisticList *DrawNumber;
 	DrawNumber = DrawNumbersStart;
 	int NumberDrawn = 0;
 	int DrawCardSlot = 0;
 	int DrawListLocation = 0;
-    char ball;
-    int ballIndex;
+    int ball_num;
     int ballsDrawn = 0;  
-
+	string draw_date = "";
     string line;
-    ifstream file(DrawHistoryFile);
+
+    ifstream file(drawHistoryFile);
     if (!file.is_open()) {
-        cerr << "Error opening file: " << DrawHistoryFile << endl;
+        cerr << "Error opening file: " << drawHistoryFile << endl;
         return;
     }
     while (getline(file, line)) 
     {
         stringstream ss(line);
         DrawCardSlot = 0;
-		while (ss >> ball)
+		ss >> draw_date; // skip the date
+
+		while (ss >> ball_num)
 		{
-            LastDraw[DrawCardSlot] = ball;
-            TotalNumbersDrawn++;
+            LastDraw[DrawCardSlot] = ball_num;
+            totalNumbersDrawn++;
             DrawNumber = DrawNumbersStart;
             DrawListLocation = 0;
             while(DrawNumber != NULL)
             {
                 if (!DrawNumber->IsDrawn)
                 {
-                    if(DrawNumber->DrawNumber == ball )
+                    if(DrawNumber->DrawNumber == ball_num )
                     {
                         DrawNumber->IsDrawn = true;
 						DrawNumber->Opportunities++;
-                        CalculateDrawEvent(DrawNumber);
-                        if(TotalNumbersDrawn > SeedPool)
+                        calculate_draw_event(DrawNumber);
+                        if(totalNumbersDrawn > SeedPool)
                         {   
-                            CalculateOrdinalEvent(DrawListLocation,OrdinalNodesStart);
+                            calculate_ordinal_event(DrawListLocation,OrdinalNodesStart);
                         }
                         
                     } else DrawNumber->Opportunities++;  
@@ -282,17 +293,16 @@ void Picks::DrawEngine()
             DrawNumber=DrawNumber->Next;
         }
 		DrawCardSlot = 0;
-        if(TotalNumbersDrawn > SeedPool)
+        if(totalNumbersDrawn > SeedPool)
         {
-            SortDrawNumbersAverage();
-            SortOrdinalLists();
-            FlagClear(OrdinalNodesStart);
+            sort_draws_average();
+            sort_ordinal_lists();
+            clear_boolean_flags(OrdinalNodesStart);
         }
 	}
 	file.close();
 }
-
-void Picks::FlagClear(OrdinalNodes*& Head)
+void Analyse::clear_boolean_flags(OrdinalNodes*& Head)
 {
 	OrdinalNodes* Node = Head;
 	while (Node != NULL)
@@ -301,19 +311,19 @@ void Picks::FlagClear(OrdinalNodes*& Head)
 		Node = Node->Next;
 	}
 }
-void Picks::SortOrdinalLists()
+void Analyse::sort_ordinal_lists()
 {
 	OrdinalNodes *Current = OrdinalNodesStart;
 	
 	while(Current != NULL)
 	{
-		SortOrdinalAverage(Current);
-		FlagClear(Current);
+		sort_ordinal_average(Current);
+		clear_boolean_flags(Current);
 		Current = Current->Next;
 	}
 
 }
-void Picks::CalculateOrdinalEvent(int Postion, OrdinalNodes*& Node)
+void Analyse::calculate_ordinal_event(int Postion, OrdinalNodes*& Node)
 {
 
 	OrdinalList* OrdinalListNode = &Node->ListNode;
@@ -336,10 +346,10 @@ void Picks::CalculateOrdinalEvent(int Postion, OrdinalNodes*& Node)
 				{
 					Node->Next = new OrdinalNodes;
 					//Node.Next->ListNode = new OrdinalList;
-					InitOrdinalList(Node->ListNode);
+					init_ordinal_list(Node->ListNode);
 					
 				}
-				CalculateOrdinalEvent(OrdinalListLocation, Node->Next);
+				calculate_ordinal_event(OrdinalListLocation, Node->Next);
 				
 			} else OrdinalListNode->Opportunities++;
 		}
@@ -347,14 +357,14 @@ void Picks::CalculateOrdinalEvent(int Postion, OrdinalNodes*& Node)
 		OrdinalListLocation++;
 	}
 }
-void Picks::InitOrdinalList(OrdinalList& Head)
+void Analyse::init_ordinal_list(OrdinalList& Head)
 {
 	OrdinalList* OrdinalListNode = &Head;
 	
 	int OrdinalSet = 0;
 	do
 	{
-		if(Debug){
+		if(debug){
 			cout<<OrdinalListNode->Ordinal<<'\n';
 		}
 
@@ -373,13 +383,13 @@ void Picks::InitOrdinalList(OrdinalList& Head)
 		OrdinalListNode = OrdinalListNode->Next;
 	}while(OrdinalSet < 49);
 }
-void Picks::CalculateDrawEvent(DrawStatisticList*& Number)
+void Analyse::calculate_draw_event(DrawStatisticList*& Number)
 {
 	Number->TotalTimesDrawn++;
 	Number->Average = Number->TotalTimesDrawn / Number->Opportunities;
-	Number->LastDrawn = TotalNumbersDrawn;
+	Number->LastDrawn = totalNumbersDrawn;
 };
-bool Picks::ValidateDrawCombination(Card PossibleCombinationCard)
+bool Analyse::validate_draw_combination(Card PossibleCombinationCard)
 {
 	/*there are a set of statistical annomolies that relate to winning draws, 
 	this function will invalidate any combination without these traits.
@@ -394,7 +404,7 @@ bool Picks::ValidateDrawCombination(Card PossibleCombinationCard)
 	int forties = 0;
 	int Low = 0;
 	//check for a prime number, invalid if not
-	if (!CombinationHasPrimeNumber(PossibleCombinationCard))
+	if (!prime_number_check(PossibleCombinationCard))
 		return false;
 	
     // there is a much better way im sure with some effort.
@@ -428,7 +438,7 @@ bool Picks::ValidateDrawCombination(Card PossibleCombinationCard)
 		return false;
 	return true;
 }
-bool Picks::CombinationHasPrimeNumber(Card num)
+bool Analyse::prime_number_check(Card num)
 {
 	for (int i = 0; i < 6; i++)
 	{
@@ -440,11 +450,11 @@ bool Picks::CombinationHasPrimeNumber(Card num)
 	}
 	return false;
 }
-void Picks::CreateCombinations()
+void Analyse::create_all_combinations()
 {
 	//This function creates every draw combination and validates them for use in this program.
 
-	FILE *CombinationOutputFile = fopen(CombinationCollectionFile, "wb");
+	FILE *CombinationOutputFile = fopen(combinationCollectionFile, "wb");
 	int TotalGeneratedCombinations = 0;
     int TotalValidCombinations = 0;
 	Card DrawCombination;
@@ -473,11 +483,11 @@ void Picks::CreateCombinations()
                                 DrawCombination[5] = DrawPosition6;
                                 DrawCombination[6] = DrawPosition7;
                                 TotalGeneratedCombinations++;
-                                if (ValidateDrawCombination(DrawCombination)) {
+                                if (validate_draw_combination(DrawCombination)) {
                                     TotalValidCombinations++;
 
-                                    if (DebugMode) {
-                                        cout << "Found combination " << TotalValidCombinations << ": ";
+                                    if (debugMode) {
+                                        cout << "Combination " << TotalValidCombinations << ": ";
                                         for (int j = 0; j < DRAW_SIZE; ++j) {
                                             cout << (int)DrawCombination[j] << ' ';
                                         }
@@ -502,241 +512,96 @@ void Picks::CreateCombinations()
     cout << "Generated " << TotalGeneratedCombinations << ":" << '\n';
 	fclose(CombinationOutputFile);
 }
+bool load_config(const string& configFilePath, Config& config) {
+    ifstream configFile(configFilePath);
+    if (!configFile.is_open()) {
+        cerr << "Error opening config file: " << configFilePath << endl;
+        return false;
+    }
+
+    string line;
+    while (getline(configFile, line)) {
+        stringstream ss(line);
+        string key, value;
+        if (getline(ss, key, '=') && getline(ss, value)) {
+            if (key == "combinationCollectionFile") {
+                config.combinationCollectionFile = value;
+            } else if (key == "drawHistoryFile") {
+                config.drawHistoryFile = value;
+            } else if (key == "debugMode") {
+                config.debugMode = (value == "true");
+			}
+        }
+    }
+    configFile.close();
+    return true;
+}
 
 int main() {
-    Picks picks;
-    picks.Initialize();
+    Config config;
+    string configFilePath = "configs";
 
-    // Prompt for filename with default value
-    strncpy(picks.CombinationCollectionFile, "./CombinationCollectionFile", sizeof(picks.CombinationCollectionFile) - 1);
-    picks.CombinationCollectionFile[sizeof(picks.CombinationCollectionFile) - 1] = '\0'; // Ensure null termination
-
-    cout << "Enter filename for combinations (default: ./CombinationCollectionFile): ";
+    cout << "Enter config file path (default: configs): ";
     string userInput;
-    cin.ignore();  // Clear the input buffer before getline
     getline(cin, userInput);
 
     if (!userInput.empty()) {
-        strncpy(picks.CombinationCollectionFile, userInput.c_str(), sizeof(picks.CombinationCollectionFile) - 1);
-        picks.CombinationCollectionFile[sizeof(picks.CombinationCollectionFile) - 1] = '\0'; // Ensure null termination
+        configFilePath = userInput;
     }
 
-    cout << "Enable debug mode? (y/n): ";
-    cin >> userInput;
-    picks.DebugMode = (userInput == "y");
-
-    if (picks.DebugMode) {
-        cout << "Perform statistical analysis? (y/n): ";
-        cin >> userInput;
-        picks.PerformAnalysis = (userInput == "y");
-
-        cout << "Use root data? (y/n): ";
-        cin >> userInput;
-        picks.UseRootData = (userInput == "y");
+    if (!load_config(configFilePath, config)) {
+        cerr << "Using default settings." << endl;
     }
+
+if (config.debugMode) {
+        std::cout << "Combinations file: " << config.combinationCollectionFile << std::endl;
+        std::cout << "Draw history file: " << config.drawHistoryFile << std::endl;
+        std::cout << "Debug mode: " << (config.debugMode ? "Enabled" : "Disabled") << std::endl;
+    }
+
+    Analyse drawData;
+    drawData.debugMode = config.debugMode;
+
+    // Fault tolerance for strncpy
+    if (config.combinationCollectionFile.size() >= sizeof(drawData.combinationCollectionFile)) {
+        std::cerr << "Error: combinationCollectionFile is too long!" << std::endl;
+        return 1;
+    }
+    if (config.drawHistoryFile.size() >= sizeof(drawData.drawHistoryFile)) {
+        std::cerr << "Error: drawHistoryFile is too long!" << std::endl;
+        return 1;
+    }
+
+    strncpy(drawData.combinationCollectionFile, config.combinationCollectionFile.c_str(), sizeof(drawData.combinationCollectionFile) - 1);
+    drawData.combinationCollectionFile[sizeof(drawData.combinationCollectionFile) - 1] = '\0'; // Ensure null termination
+
+    strncpy(drawData.drawHistoryFile, config.drawHistoryFile.c_str(), sizeof(drawData.drawHistoryFile) - 1);
+    drawData.drawHistoryFile[sizeof(drawData.drawHistoryFile) - 1] = '\0'; // Ensure null termination
+
+    if (config.debugMode) {
+        std::cout << "Combination file path set to: " << drawData.combinationCollectionFile << std::endl;
+        std::cout << "Draw history file path set to: " << drawData.drawHistoryFile << std::endl;
+    }
+
+    drawData.init_all();
 
     // Load combinations from file or create them if loading fails
-    FILE* combinationFile = fopen(picks.CombinationCollectionFile, "r");
+    FILE* combinationFile = fopen(drawData.combinationCollectionFile, "r");
     if (!combinationFile) {
-        picks.CreateCombinations();
+        if (config.debugMode) {
+            std::cerr << "Error opening combination file: " << drawData.combinationCollectionFile << " (" << strerror(errno) << ")" << std::endl;
+            std::cerr << "Creating new combinations..." << std::endl;
+        }
+        drawData.create_all_combinations();
+    } else {
+        if (config.debugMode) {
+            std::cout << "Combination file opened successfully: " << drawData.combinationCollectionFile << std::endl;
+        }
+        fclose(combinationFile);
     }
-	fclose(combinationFile);
-     // Prompt for filename with default value
-    strncpy(picks.DrawHistoryFile, "./extracted_draws649-10-31-2015.csv", sizeof(picks.DrawHistoryFile) - 1);
-    picks.DrawHistoryFile[sizeof(picks.DrawHistoryFile) - 1] = '\0'; // Ensure null termination
-
-    cout << "Enter filename for draw history (default: extracted_draws649-10-31-2015.csv): ";
-    cin.ignore();  // Clear the input buffer before getline
-    getline(cin, userInput);
-    if (!userInput.empty()) {
-        strncpy(picks.DrawHistoryFile, userInput.c_str(), sizeof(picks.DrawHistoryFile) - 1);
-        picks.DrawHistoryFile[sizeof(picks.DrawHistoryFile) - 1] = '\0'; // Ensure null termination
-    }
-
 
     // Run the draw engine
-    picks.DrawEngine();
+    drawData.analyse_all_draws();
 
     return 0;
 }
-
-/*
-void Picks::Picker()
-{
-	cout << "score count=" << score_count << '\n';
-	cout << "diff count=" << DifferenceCount << '\n';
-	cout << "sig_count=" << SigmaCount << '\n';
-	cout << "avg count=" << AverageCount << '\n';
-	int pos = 0;
-	int i = 1;
-	int y = 0;
-	Card tmp;
-	ValidCombinationList *tc;
-	char ans = 'y';
-	char pans = 'n';
-	char show = 'n';
-	bool valid = false;
-	int set[49];
-	for (int j = 0; j < 49; j++)
-		set[j] = 0;
-	cout << "first total combos=" << TotalValidCombinationCards + 1 << '\n';
-	if (debug == 'y')
-	{
-		cout << "show set?\n";
-		cin >> show;
-	}
-	tc = ValidCombinationsStart;
-	while (tc != NULL)
-	{
-		for (int k = 0; k < 6; k++)
-			NumberStatistics[((int)tc->ValidCombination[k]) - 1].rm++;
-		tc = tc->Next;
-	}
-	// ReCull();
-	if (show == 'y')
-	{
-		tc = ValidCombinationsStart;
-		while (tc != NULL)
-		{
-			for (int k = 0; k < 6; k++)
-				set[((int)tc->ValidCombination[k]) - 1]++;
-			tc = tc->Next;
-		}
-		for (int q = 0; q < 49; q++)
-		{
-			if (set[q] != 0)
-				cout << q + 1 << " hit " << set[q] << '\n';
-		}
-	}
-	while (!valid)
-	{
-		cout << "total combos=" << TotalValidCombinationCards + 1 << '\n';
-		cout << "enter the position\n";
-		cin >> pos;
-		pos--;
-		if ((pos >= 0 && pos <= TotalValidCombinationCards))
-			valid = true;
-		else
-			cout << "\nInvalid responce, enter the position\n";
-	}
-	valid = false;
-	while (true)
-	{
-		tc = ValidCombinationsStart;
-		while (i < pos)
-		{
-			tc = tc->Next;
-			i++;
-		}
-		cout << "Random pick = ";
-		y = 0;
-		while (picks[y] != 99)
-		{
-			if (debug == 'y')
-				cout << (int)picks[y] << " ";
-			y++;
-		}
-		cout << "\n--> ";
-		for (int j = 0; j < 6; j++)
-		{
-			cout << (int)tc->ValidCombination[j] << ' ';
-			tmp[j] = tc->ValidCombination[j];
-			picks[y] = tc->ValidCombination[j];
-			y++;
-		}
-		cout << '\n';
-		// cout<<"another?"<<'\n';
-		i = 1;
-		/*cin>>ans;
-		if(ans!='y')
-			break;
-		if (Trim(tmp))
-		{
-			valid = false;
-			while (!valid)
-			{
-				cout << "total combos=" << TotalValidCombinationCards + 1 << '\n';
-				cout << "enter the position\n";
-				cin >> pos;
-				pos--;
-				if ((pos >= 0 && pos <= TotalValidCombinationCards))
-					valid = true;
-				else
-					cout << "\nInvalid responce, enter the position\n";
-			}
-		}
-		else
-			return;
-	}
-}*/
-
-/*bool Picks::LoadCombinationsList() 
-{
-    FILE* combinationFile = fopen(CombinationCollectionFile, "r");
-    if (!combinationFile) {
-        cerr << "Error opening file: " << CombinationCollectionFile << endl;
-        return false;
-    }
-
-    ValidCombinationList* currentCard = new ValidCombinationList;
-	ValidCombinationsStart = currentCard;
-    TotalValidCombinationCards = 0;
-	int combinationCounter = 0;
-    char buffer[DRAW_SIZE * 3]; // Buffer to hold a line of the file
-
-    while (fgets(buffer, sizeof(buffer), combinationFile)) {
-        // Parse the line into individual numbers
-        if (sscanf(buffer, "%d %d %d %d %d %d %d", 
-            &currentCard->ValidCombination[0], 
-            &currentCard->ValidCombination[1], 
-            &currentCard->ValidCombination[2], 
-            &currentCard->ValidCombination[3], 
-            &currentCard->ValidCombination[4], 
-            &currentCard->ValidCombination[5],
-            &currentCard->ValidCombination[6]) != DRAW_SIZE) {
-            cerr << "Error parsing line: " << buffer << endl;
-            continue;
-        }
-		combinationCounter++;
-        if (DebugMode) {
-            cout << "Combination #"<<combinationCounter<< ' '<<"Loaded as ->";
-            for (int i = 0; i < DRAW_SIZE; ++i) {
-                cout << currentCard->ValidCombination[i] << ' ';
-            }
-            cout << endl;
-        }
-
-        TotalValidCombinationCards++;
-
-        currentCard->Next = new ValidCombinationList;
-        currentCard = currentCard->Next;
-        currentCard->Next = NULL;
-    }
-
-    // Clean up the last unused node
-    ValidCombinationList* temp = ValidCombinationsStart;
-    while (temp->Next->Next != NULL) {
-        temp = temp->Next;
-    }
-    delete temp->Next;
-    temp->Next = NULL;
-    fclose(combinationFile);
-
-    if (DebugMode) {
-        cout << "Total valid combinations loaded: " << TotalValidCombinationCards << endl;
-    }
-
-    if (TotalValidCombinationCards == 0) {
-        return false;
-    } else {
-        return true;
-    }
-}*/
-
-
-
-
-
-
-
-
