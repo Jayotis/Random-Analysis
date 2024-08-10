@@ -23,8 +23,8 @@ Good question! Here's the rundown:
 If you're curious to see what this code does, here's how you can get started:
 
 ```bash
-git clone https://github.com/YourUsername/Lotto649-Randomness-Analysis.git
-cd Lotto649-Randomness-Analysis
+git clone https://github.com/Jayotis/Random-Analysis.git
+cd Random-Analysis
 g++ Random-Analysis.cpp -o Random-Analysis
 ./Random-Analysis
 ```
