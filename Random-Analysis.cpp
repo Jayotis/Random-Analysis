@@ -31,6 +31,7 @@ struct DrawStatisticList{
 	int totalTimesDrawn;
 	int drawNumber;
 	bool isDrawn;
+	double ordinalChance;
 	int opportunities; //each attempt to draw this number from the avaliable balls. 
 	double average;
 	int lastDrawn;
@@ -46,7 +47,8 @@ struct ordinalListNode{
 	int landedTotal;
 	int ordinal;
 	int opportunities;
-	float average;
+	double ordinalChance;
+	double average;
 	bool isDrawn;
 	ordinalListNode *_next;
 };
@@ -83,8 +85,10 @@ public:
 	bool validate_draw_combination(Card);
 	void record_ordinal_opportunity(int,ordinalBranch*&);
 	void Print();
+	void correlate_data();
 	// bool LoadCombinationsList();
 	void calculate_draw_event(DrawStatisticList*&);
+	void propagate_statistical_tree(int, double, ordinalBranch*&);
 	void Picker();
 	void sort_draws_average();
 	void sort_ordinal_average(ordinalBranch*&);
@@ -106,11 +110,11 @@ public:
 	ordinalBranch *_ordinalBranchStart;
 	Card _lastDraw;
 	ValidCombinationList *_validCombinationsStart;
-    char _performAnalysis,UseRootData;
 	int _drawHistoryTotal;
 	int _totalPicks;
 	int _totalNumbersDrawn;
 	int _totalValidCombinationCards;
+	int _ordinalBranchTotalNodes;
 	char _drawHistoryFile[50];
 	char _combinationCollectionFile[50];
 	bool _debugMode;
@@ -136,6 +140,7 @@ void Analyse::init_all()
 		currentDrawNumber->opportunities = 0;
 		currentDrawNumber->average = 0.0;
 		currentDrawNumber->lastDrawn = 0;
+		currentDrawNumber->ordinalChance = 0.0;
 
 		ballValue++;
 
@@ -169,6 +174,7 @@ void Analyse::init_all()
 	_ordinalBranchStart->_next = NULL;
 
 	_totalNumbersDrawn = 0;
+	_ordinalBranchTotalNodes = 1;
 	_debugMode = true;
 	
 }
@@ -183,6 +189,7 @@ void Analyse::display_draw_statistics()
                   << " Total Drawn: " << currentDraw->totalTimesDrawn
                   << " Opportunities: " << currentDraw->opportunities
                   << " Average: " << currentDraw->average
+				  << " Ordinal Chance: " << currentDraw->ordinalChance
                   << " Last Drawn: " << currentDraw->lastDrawn << std::endl;
 		currentDraw = currentDraw->_next;
 	}
@@ -262,15 +269,16 @@ void Analyse::sort_ordinal_average(ordinalBranch*& Head)
 void Analyse::record_ordinal_opportunity(int ordinance, ordinalBranch*& Node)
 {
 	ordinalBranch* currentBranch;
-	ordinalListNode* currentList;
+	ordinalListNode* currentListNode;
 	currentBranch = Node;
 	int listOrdinance = 1;
-	currentList = currentBranch->listNode;
-	while(currentList != nullptr)
+	currentListNode = currentBranch->listNode;
+	while(currentListNode != nullptr)
 	{
-		if(currentList->ordinal == ordinance)
+		if(currentListNode->ordinal == ordinance)
 		{
-			currentList->opportunities++;
+			currentListNode->opportunities++;
+			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / static_cast<double>(currentListNode->opportunities);
 			if(Node->_next != nullptr){
 				record_ordinal_opportunity(listOrdinance, Node->_next);
 			}
@@ -278,7 +286,7 @@ void Analyse::record_ordinal_opportunity(int ordinance, ordinalBranch*& Node)
 		}
 		else 
 		{
-			currentList = currentList->_next;
+			currentListNode = currentListNode->_next;
 			listOrdinance++;
 		}
 	}
@@ -302,6 +310,7 @@ void Analyse::analyse_all_draws()
     }
 	if (_debugMode)
     	cerr << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
+
     if (getline(file, line)) {
         if (_debugMode)
             cerr << "[Debug] Skipping header line: " << line << endl;
@@ -394,7 +403,51 @@ void Analyse::analyse_all_draws()
     file.close();
     cerr << "[Debug] Finished processing all draws." << endl;
 }
+void Analyse::correlate_data()
+{
+	ordinalBranch* currentBranch;
+	ordinalListNode* currentListNode;
+	currentBranch = _ordinalBranchStart;
+	while (currentBranch->_next != nullptr){
+		currentBranch = currentBranch->_next;
+	}
+	currentListNode = currentBranch->listNode;
+	while ( currentListNode != nullptr)
+	{
+		propagate_statistical_tree(currentListNode->ordinal,currentListNode->average,currentBranch->_previous);
+		currentListNode = currentListNode->_next;
+	}
+}
+void Analyse::propagate_statistical_tree(int ordinance, double ordinalSum, ordinalBranch*& branchNode)
+{
+	ordinalListNode* currentListNode;
+	currentListNode = branchNode->listNode;
 
+	int listOrdinance = 1;
+	while (listOrdinance < ordinance){
+		currentListNode = currentListNode->_next;
+		listOrdinance++; 
+	}
+	currentListNode->ordinalChance = ordinalSum;
+
+	double ordinalSummation = currentListNode->average+ordinalSum;
+	
+	if( branchNode->_previous != nullptr){
+		propagate_statistical_tree(currentListNode->ordinal,ordinalSummation,branchNode->_previous);
+	}
+	// we are at the base branch node which refferences the rank in the draw list sorted by averages.
+	else {
+		DrawStatisticList* drawList;
+		drawList = _drawNumbersStart;
+		// find the draw number based on the ordinal position in the sorted draw list. Big To Do here. :) 
+		listOrdinance = 1;
+		while(listOrdinance < currentListNode->ordinal){
+			drawList = drawList->_next;
+			listOrdinance++;
+		}
+		drawList->ordinalChance = ordinalSummation;
+	}
+}
 void Analyse::sort_ordinal_lists()
 {
 	ordinalBranch *Current = _ordinalBranchStart;
@@ -419,17 +472,19 @@ void Analyse::calculate_ordinal_event(int ordinance, ordinalBranch*& Node)
 		{
 			currentListNode->landedTotal++;
 			currentListNode->opportunities++;
-			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / currentListNode->opportunities;
+			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / static_cast<double>(currentListNode->opportunities);
 			Node->SampleSize++;
 			if(Node->_next != nullptr){
 				calculate_ordinal_event(OrdinalListLocation, Node->_next);
 			}
 			else if (Node->SampleSize > _ordinalSeedPool)
 			{
+				_ordinalBranchTotalNodes++;
 				Node->_next = new ordinalBranch;
 				Node->_next->SampleSize = 0;
 				Node->_next->_next = NULL;
 				Node->_next->_previous = Node;
+
 				initialize_ordinal_list(Node->_next->listNode);
 				calculate_ordinal_event(OrdinalListLocation, Node->_next);
 			}
@@ -453,30 +508,26 @@ void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
 
     // Initialize the head node
     Head = new ordinalListNode;
-    if (!Head) {
-        cerr << "[Error] Memory allocation failed for the head of ordinal list." << endl;
-        return;
-    }
-
-    ordinalListNode* current = Head;
+    ordinalListNode* currentList = Head;
 
     // Use the shuffled numbers to initialize the list
     for (int i = 0; i < 49; ++i) {
-        current->ordinal = ordinals[i];
-        current->average = 0.0;
-        current->isDrawn = false;
-        current->opportunities = 0;
-        current->landedTotal = 0;
+        currentList->ordinal = ordinals[i];
+        currentList->average = 0.0;
+        currentList->isDrawn = false;
+        currentList->opportunities = 0;
+		currentList->ordinalChance = 0.0;
+        currentList->landedTotal = 0;
 
         if (i < 48) {
-            current->_next = new ordinalListNode;
-            if (!current->_next) {
+            currentList->_next = new ordinalListNode;
+            if (!currentList->_next) {
                 cerr << "[Error] Memory allocation failed at position " << (i + 1) << endl;
                 break;  // Stop the loop if memory allocation fails
             }
-            current = current->_next;
+            currentList = currentList->_next;
         } else {
-            current->_next = nullptr;
+            currentList->_next = nullptr;
         }
     }
 }
@@ -484,7 +535,7 @@ void Analyse::calculate_draw_event(DrawStatisticList*& Number)
 {
 	Number->totalTimesDrawn++;
 	Number->opportunities++;
-	Number->average = static_cast<double>(Number->totalTimesDrawn) / Number->opportunities;
+	Number->average = static_cast<double>(Number->totalTimesDrawn) / static_cast<double>(Number->opportunities);
 	Number->lastDrawn = _totalNumbersDrawn;
 	Number->isDrawn = true;
 }
@@ -694,6 +745,7 @@ if (config.debugMode) {
 
     // Run the draw engine
     drawData.analyse_all_draws();
+	drawData.correlate_data();
 	drawData.display_draw_statistics();
 	drawData.display_ordinal_lists();
     return 0;
