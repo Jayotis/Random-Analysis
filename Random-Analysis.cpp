@@ -21,7 +21,8 @@ using namespace std;
 
 const int _drawRange = 49;
 const int _drawCardSize = 7;
-const int _seedPool = 500;
+const int _drawSeedPool = 500;
+const int _ordinalSeedPool = 500;
 char _primeNumbers[15] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
 typedef int Card[_drawCardSize];
 
@@ -87,10 +88,9 @@ public:
 	void Picker();
 	void sort_draws_average();
 	void sort_ordinal_average(ordinalBranch*&);
-	void clear_boolean_flags(ordinalBranch*&);
 	void initialize_ordinal_list(ordinalListNode*&);
 	bool load_config(const string&, Config&);
-	// Each OrdinalList is statistically represented once the lists are seeded.
+
 
 
 	struct ValidCombinationList{
@@ -121,7 +121,7 @@ void Analyse::init_all()
 	// Initialize the linked list
 	_drawNumbersStart = new DrawStatisticList;
 	if (!_drawNumbersStart) {
-		cout << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
+		cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
 		return; // You may want to handle this more gracefully in your actual application
 	}
 
@@ -147,7 +147,7 @@ void Analyse::init_all()
 		// Allocate memory for the next node
 		currentDrawNumber->_next = new DrawStatisticList;
 		if (!currentDrawNumber->_next) {
-			cout << "[Error] Failed to allocate memory for next DrawStatisticList node." << endl;
+			cerr << "[Error] Failed to allocate memory for next DrawStatisticList node." << endl;
 			currentDrawNumber->_next = NULL;
 			break; // Exit the loop if memory allocation fails
 		}
@@ -189,25 +189,24 @@ void Analyse::display_draw_statistics()
 
 }
 void Analyse::display_ordinal_lists() {
-	ordinalBranch* currentOrdinal;
-	currentOrdinal = _ordinalBranchStart;
+	ordinalBranch* currentBranch;
+	currentBranch = _ordinalBranchStart;
 	int OrdinalLevel = 1;
-	while(currentOrdinal != NULL)
+	while(currentBranch != NULL)
 	{
-		std::cerr << "Ordinal Level "<<OrdinalLevel<<" sample size: "<<currentOrdinal->SampleSize<<" List:" << std::endl;
-		ordinalListNode* current = _ordinalBranchStart->listNode;
-		while (current != nullptr) {
-			std::cerr << "  Ordinal: " << current->ordinal
-					<< " Average: " << current->average
-					<< " Landed Total: " << current->landedTotal
-					<< " Opportunities: " << current->opportunities << std::endl;
-			current = current->_next;
+		std::cerr << "Ordinal Level "<<OrdinalLevel<<" sample size: "<<currentBranch->SampleSize<<" List:" << std::endl;
+		ordinalListNode* currentOrdinal = currentBranch->listNode;
+		while (currentOrdinal != nullptr) {
+			std::cerr << "  Ordinal: " << currentOrdinal->ordinal
+					<< " Average: " << currentOrdinal->average
+					<< " Landed Total: " << currentOrdinal->landedTotal
+					<< " Opportunities: " << currentOrdinal->opportunities << std::endl;
+			currentOrdinal = currentOrdinal->_next;
 		}
 		std::cerr<<std::endl;
-		currentOrdinal = currentOrdinal->_next;
+		currentBranch = currentBranch->_next;
 		OrdinalLevel++;
 	}
-
 }
 void Analyse::sort_draws_average()
 {
@@ -298,21 +297,21 @@ void Analyse::analyse_all_draws()
     // Open the file with error checking
     ifstream file(_drawHistoryFile);
     if (!file.is_open()) {
-        cout << "[Error] Failed to open file: " << _drawHistoryFile << endl;
+        cerr << "[Error] Failed to open file: " << _drawHistoryFile << endl;
         return;
     }
 	if (_debugMode)
-    	cout << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
+    	cerr << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
     if (getline(file, line)) {
         if (_debugMode)
-            cout << "[Debug] Skipping header line: " << line << endl;
+            cerr << "[Debug] Skipping header line: " << line << endl;
     }
 
     // Read each line from the file
     while (getline(file, line)) 
     {
         if (line.empty()) {
-            cout << "[Warning] Skipping empty line in file." << endl;
+            cerr << "[Warning] Skipping empty line in file." << endl;
             continue;
         }
         stringstream ss(line);
@@ -321,7 +320,7 @@ void Analyse::analyse_all_draws()
 
         // Read the draw date
         if (!getline(ss, drawDate, ',')) {
-            cout << "[Error] Failed to read draw date from line: " << line << endl;
+            cerr << "[Error] Failed to read draw date from line: " << line << endl;
             continue;
         }
 		
@@ -332,19 +331,18 @@ void Analyse::analyse_all_draws()
             try {
                 ballNumber = stoi(line); // Convert the string to an integer
             } catch (const invalid_argument& e) {
-                cout << "[Error] Invalid ball number in line: " << line << endl;
+                cerr << "[Error] Invalid ball number in line: " << line << endl;
                 continue;
             }
 
             if (drawCardSlot >= _drawCardSize) {  // Assuming MAX_DRAW_SLOTS is defined
-                cout << "[Error] Exceeded maximum draw slots for date: " << drawDate << endl;
+                cerr << "[Error] Exceeded maximum draw slots for date: " << drawDate << endl;
                 break;
             }
 
             _lastDraw[drawCardSlot] = ballNumber;
-            _totalNumbersDrawn++;
-			if(_debugMode)
-            	cout << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << endl;
+            if(_debugMode)
+            	cerr << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << endl;
 
             listNumber = _drawNumbersStart;
             drawListLocation = 1;
@@ -355,18 +353,18 @@ void Analyse::analyse_all_draws()
                 {
                     if (listNumber->drawNumber == ballNumber)
                     {
-						if(_debugMode)
-                        	cout << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << endl;
-                        
+						_totalNumbersDrawn++;
                         calculate_draw_event(listNumber);
-
-                        if (_totalNumbersDrawn > _seedPool){   
+                        if (_totalNumbersDrawn > _drawSeedPool)
                             calculate_ordinal_event(drawListLocation, _ordinalBranchStart);
-                        }
+                        
+						if(_debugMode)
+                        	cerr << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << endl;
                     } 
-                    else {
+                    else 
+					{
                         listNumber->opportunities++;
-						if (_totalNumbersDrawn > _seedPool){
+						if (_totalNumbersDrawn > _drawSeedPool){
 							record_ordinal_opportunity(drawListLocation, _ordinalBranchStart);
 						}
                     }
@@ -385,36 +383,18 @@ void Analyse::analyse_all_draws()
             listNumber = listNumber->_next;
         }
         sort_draws_average();
-        // If the first ordinal list is a stable size, perform sorting and clearing operations
-        if (_totalNumbersDrawn > _seedPool)
-        {
-			if(_debugMode)
-            	cout << "[Debug] Sorting draws and ordinal lists." << endl;
 
+        // If the first ordinal list is a stable size, perform sorting and clearing operations
+        if (_totalNumbersDrawn > _drawSeedPool){
             sort_ordinal_lists();
-            clear_boolean_flags(_ordinalBranchStart);
         }
     }
 
     // Close the file
     file.close();
-    cout << "[Debug] Finished processing all draws." << endl;
+    cerr << "[Debug] Finished processing all draws." << endl;
 }
-void Analyse::clear_boolean_flags(ordinalBranch*& Head)
-{
-	ordinalBranch* Node = Head;
-	ordinalListNode* currentListNode;
-	while (Node != NULL)
-	{
-		currentListNode = Node->listNode;
-		while ( currentListNode != nullptr )
-		{
-			currentListNode->isDrawn = false;
-			currentListNode = currentListNode->_next;
-		}
-		Node = Node->_next;
-	}
-}
+
 void Analyse::sort_ordinal_lists()
 {
 	ordinalBranch *Current = _ordinalBranchStart;
@@ -422,48 +402,41 @@ void Analyse::sort_ordinal_lists()
 	while(Current != NULL)
 	{
 		sort_ordinal_average(Current);
-		clear_boolean_flags(Current);
 		Current = Current->_next;
 	}
 
 }
-void Analyse::calculate_ordinal_event(int Postion, ordinalBranch*& Node)
+void Analyse::calculate_ordinal_event(int ordinance, ordinalBranch*& Node)
 {
-
-	ordinalListNode* OrdinalListNode = Node->listNode;
+	ordinalListNode* currentListNode = Node->listNode;
 
 	int NumberDrawn = 0;
 	int DrawCardSlot = 0;
-	int OrdinalListLocation = 0;
-	while(OrdinalListNode != nullptr)
+	int OrdinalListLocation = 1;
+	while(currentListNode != nullptr)
 	{
-		if (!OrdinalListNode->isDrawn)
+		if(currentListNode->ordinal == ordinance)
 		{
-			if(OrdinalListNode->ordinal == Postion)
+			currentListNode->landedTotal++;
+			currentListNode->opportunities++;
+			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / currentListNode->opportunities;
+			Node->SampleSize++;
+			if(Node->_next != nullptr){
+				calculate_ordinal_event(OrdinalListLocation, Node->_next);
+			}
+			else if (Node->SampleSize > _ordinalSeedPool)
 			{
-				OrdinalListNode->isDrawn = true;
-				OrdinalListNode->landedTotal++;
-				OrdinalListNode->opportunities++;
-				OrdinalListNode->average = static_cast<double>(OrdinalListNode->landedTotal) / OrdinalListNode->opportunities;
-				Node->SampleSize++;
-				if(Node->_next != nullptr)
-				{
-					calculate_ordinal_event(OrdinalListLocation, Node->_next);
-				}
-                else if (Node->SampleSize >= _seedPool)
-                {
-					Node->_next = new ordinalBranch;
-					Node->_next->SampleSize = 0;
-					Node->_next->_next = NULL;
-					Node->_next->_previous = Node;
-					initialize_ordinal_list(Node->_next->listNode);
-					calculate_ordinal_event(OrdinalListLocation, Node->_next);
-				}
-				
-			} else OrdinalListNode->opportunities++;
+				Node->_next = new ordinalBranch;
+				Node->_next->SampleSize = 0;
+				Node->_next->_next = NULL;
+				Node->_next->_previous = Node;
+				initialize_ordinal_list(Node->_next->listNode);
+				calculate_ordinal_event(OrdinalListLocation, Node->_next);
+			}
+			return;
 		}
-		OrdinalListNode = OrdinalListNode->_next;
-		OrdinalListLocation++;
+		currentListNode = currentListNode->_next;
+		OrdinalListLocation++;	
 	}
 }
 void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
@@ -481,7 +454,7 @@ void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
     // Initialize the head node
     Head = new ordinalListNode;
     if (!Head) {
-        cout << "[Error] Memory allocation failed for the head of ordinal list." << endl;
+        cerr << "[Error] Memory allocation failed for the head of ordinal list." << endl;
         return;
     }
 
@@ -498,7 +471,7 @@ void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
         if (i < 48) {
             current->_next = new ordinalListNode;
             if (!current->_next) {
-                cout << "[Error] Memory allocation failed at position " << (i + 1) << endl;
+                cerr << "[Error] Memory allocation failed at position " << (i + 1) << endl;
                 break;  // Stop the loop if memory allocation fails
             }
             current = current->_next;
@@ -511,10 +484,10 @@ void Analyse::calculate_draw_event(DrawStatisticList*& Number)
 {
 	Number->totalTimesDrawn++;
 	Number->opportunities++;
-	Number->average = Number->totalTimesDrawn / Number->opportunities;
+	Number->average = static_cast<double>(Number->totalTimesDrawn) / Number->opportunities;
 	Number->lastDrawn = _totalNumbersDrawn;
 	Number->isDrawn = true;
-};
+}
 bool Analyse::validate_draw_combination(Card PossibleCombinationCard)
 {
 	/*there are a set of statistical annomolies that relate to winning draws, 
@@ -628,13 +601,13 @@ void Analyse::create_all_combinations()
 			}
 		}
 	}
-    cout << "Generated " << TotalGeneratedCombinations << ":" << '\n';
+    cerr << "Generated " << TotalGeneratedCombinations << ":" << '\n';
 	fclose(CombinationOutputFile);
 }
 bool load_config(const string& configFilePath, Config& config) {
     ifstream configFile(configFilePath);
     if (!configFile.is_open()) {
-        cout << "Error opening config file: " << configFilePath << endl;
+        cerr << "Error opening config file: " << configFilePath << endl;
         return false;
     }
 
@@ -660,7 +633,7 @@ int main() {
     Config config;
     string configFilePath = "configs";
 
-    cout << "Enter config file path (default: configs): ";
+    cerr << "Enter config file path (default: configs): ";
     string userInput;
     getline(cin, userInput);
 
@@ -669,7 +642,7 @@ int main() {
     }
 
     if (!load_config(configFilePath, config)) {
-        cout << "Using default settings." << endl;
+        cerr << "Using default settings." << endl;
     }
 
 if (config.debugMode) {
