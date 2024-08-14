@@ -18,46 +18,89 @@
 
 using namespace std;
 
-
-const int _drawRange = 49;
-const int _drawCardSize = 7;
-const int _drawSeedPool = 500;
-const int _ordinalSeedPool = 500;
+// Define constants related to Lotto 649.
+const int _drawRange = 49;		// The range of numbers that can be drawn (1-49).
+const int _drawCardSize = 7;		// The number of numbers drawn in each draw (6 + 1 bonus).
+const int _drawSampleSize = 500;		// A certain amount of draws that produce a somewhat stable(numbers don't move around wild) list. 
+const int _ordinalSampleSize = 500;		// same as above but for the ordinal lists.
 char _primeNumbers[15] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
 typedef int Card[_drawCardSize];
 
-struct DrawStatisticList{
+// Define a struct to hold statistics for each number.
+struct DrawNumberStatistics{
 
-	int totalTimesDrawn;
-	int drawNumber;
-	bool isDrawn;
-	double ordinalChance;
-	int opportunities; //each attempt to draw this number from the avaliable balls. 
-	double average;
-	int lastDrawn;
-	DrawStatisticList *_next;
+	int totalTimesDrawn;		// How many times this number has been drawn.
+	int drawNumber;				// The number itself.
+	bool isDrawn;				// Flag indicating if the number was drawn.
+	double ordinalChance;		// The summation of all the ordinal averages that point to the postion this number is in on the draw list.
+	int drawOpportunities; 			// Each attempt to draw this number from the avaliable balls. 
+	double average;				// the average as times drawn over total opportunities.
+	int lastDrawn;				// The amount of draws that have past since it was last drawn.
+	DrawNumberStatistics *_next;
 };
 
-/*This represents the statistics of the Draw Statistics Lists being correct
-	after sorting. A seed pool of Draw data is needed first. The Ordinal variable
-	referrences the previous Node in the node list unless it is the first list,
-	the first list references the DrawStatisticList */
-struct ordinalListNode{
-
-	int landedTotal;
-	int ordinal;
-	int opportunities;
-	double ordinalChance;
-	double average;
-	bool isDrawn;
-	ordinalListNode *_next;
+struct ordinalListNode {
+// Struct to represent the data for a specific ordinal position in a draw probability list.
+// This list contains 49 elements, each element referencing a rank (ordinal) in another list
+// of 49 elements that are sorted by probability. The referenced list could be a list of draw
+// numbers or another list of ordinal positions (ordinal list).
+    
+    int landedTotal;     // The total number of times a number has landed in this specific ordinal position.
+    int ordinal;         // The rank or position in the referenced list (another 49-element list).
+                         // This ordinal points to a specific rank in a list sorted by probability.
+    int opportunities;   // The number of times this ordinal position had the chance to hold a drawn number.
+                         // It counts the draw events where this position could have been selected.
+    double ordinalChance;// The cumulative probability that this ordinal position will hold a drawn number.
+                         // This is calculated by summing the average probabilities (ordinal averages) of
+                         // all ordinal list elements that reference this element, plus this element's own average.
+    double average;      // The probability that the drawn number was referenced by this ordinal.
+                         // In other words, this is the probability that this ordinal position holds the drawn number.
+    bool isDrawn;        // Flag indicating whether the number was actually drawn in this position during the current draw sequence.
+    
+    // Pointer to the next node in the linked list, representing the next ordinal position.
+    ordinalListNode *_next;
+// Detailed Explanation:
+// - This struct is part of a list of 49 elements. Each element represents an ordinal position
+//   in the draw probability list.
+// - The 'ordinal' field references a specific rank in another 49-element list, which is sorted
+//   by probability. This referenced list could either be the list of draw numbers or another ordinal list.
+// - The 'ordinalChance' field represents the cumulative probability that this ordinal position will hold a drawn number.
+//   It is calculated by summing the average probabilities (ordinal averages) of all ordinal list elements
+//   that reference this element, plus this element's own average. This means that each ordinal list is interconnected
+//   with others through the 'ordinalBranch' structure, where each element is referenced by an element in the _next listNode.
+// - The 'average' field indicates the probability that the drawn number is referenced by this ordinal.
+//   Essentially, it's the probability that this specific position in the list will contain the drawn number.
+// - The 'opportunities' field counts how many times this ordinal position had the opportunity to hold a drawn number.
+//   This provides a more detailed view of the draw events, treating each draw as a separate set of 7 random events instead of 1.
 };
 struct ordinalBranch{
+// Struct to manage the interconnection between ordinal lists.
+// Each ordinal list can reference elements in other lists through the _next listNode,
+// and these references are managed by the 'ordinalBranch' structure. This structure
+// is part of a double-linked list and tracks the number of recorded events. When the number of
+// events (sampleSize) reaches a certain threshold (_ordinalSampleSize), a new ordinal list can be instantiated.
 
-	ordinalListNode *listNode;
-	int SampleSize;  //Number of times this List recorded an event.
-	ordinalBranch *_next;
-	ordinalBranch *_previous; 
+
+    ordinalListNode *listNode;  // Pointer to the head node of the ordinal list.
+    int sampleSize;             // Number of times this List recorded an event (draw events or opportunities).
+    ordinalBranch *_next;       // Pointer to the next branch in the double-linked list.
+    ordinalBranch *_previous;   // Pointer to the previous branch in the double-linked list.
+// Detailed Explanation:
+// - The 'ordinalBranch' struct manages the connections between different ordinal lists and tracks the 
+//   number of recorded events within each list.
+// - 'listNode' points to the head of the current ordinal list, which is a list of 49 ordinalListNode elements.
+// - 'sampleSize' keeps track of the number of events (e.g., draws or opportunities) recorded in the current list.
+//   When this sample size reaches a predetermined threshold (_ordinalSampleSize), the system can instantiate a new ordinal list,
+//   effectively creating a new branch in the structure to continue tracking events without losing historical data.
+// - '_next' and '_previous' create a double-linked list structure, allowing traversal both forward and backward 
+//   through the chain of ordinal branches. This double-linking facilitates efficient navigation and management of 
+//   multiple interconnected lists, supporting complex probability analysis.
+//
+// - When '_previous' is null, it indicates that we are at the first list, which references the draw number list directly.
+// - When '_next' is null, it indicates that we are at the last list in the chain, where the ordinals reference the _previous listNode.
+//   This position is significant because it marks the start of the summation process for calculating the cumulative probability
+//   (ordinalChance) across all interconnected lists. From this last list, the cumulative probability is computed by summing
+//   the relevant averages and propagating this information back through the chain of ordinal branches.
 };
 
 struct Config {
@@ -87,7 +130,7 @@ public:
 	void Print();
 	void correlate_data();
 	// bool LoadCombinationsList();
-	void calculate_draw_event(DrawStatisticList*&);
+	void calculate_draw_event(DrawNumberStatistics*&);
 	void propagate_statistical_tree(int, double, ordinalBranch*&);
 	void Picker();
 	void sort_draws_average();
@@ -104,15 +147,15 @@ public:
 	};
 
 	std::vector<ValidCombinationList> _validCombination;
-	std::vector<DrawStatisticList*> _drawStatistics;
+	std::vector<DrawNumberStatistics*> _drawStatistics;
 
-	DrawStatisticList *_drawNumbersStart;
+	DrawNumberStatistics *_drawNumbersStart;
 	ordinalBranch *_ordinalBranchStart;
 	Card _lastDraw;
 	ValidCombinationList *_validCombinationsStart;
 	int _drawHistoryTotal;
 	int _totalPicks;
-	int _totalNumbersDrawn;
+	int _totalDrawEvents;
 	int _totalValidCombinationCards;
 	int _ordinalBranchTotalNodes;
 	char _drawHistoryFile[50];
@@ -123,13 +166,13 @@ public:
 void Analyse::init_all()
 {
 	// Initialize the linked list
-	_drawNumbersStart = new DrawStatisticList;
+	_drawNumbersStart = new DrawNumberStatistics;
 	if (!_drawNumbersStart) {
 		cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
 		return; // You may want to handle this more gracefully in your actual application
 	}
 
-	DrawStatisticList *currentDrawNumber = _drawNumbersStart;
+	DrawNumberStatistics *currentDrawNumber = _drawNumbersStart;
 	int ballValue = 0;
 
 	do {
@@ -137,7 +180,7 @@ void Analyse::init_all()
 		currentDrawNumber->totalTimesDrawn = 0;
 		currentDrawNumber->drawNumber = (ballValue + 1);
 		currentDrawNumber->isDrawn = false;
-		currentDrawNumber->opportunities = 0;
+		currentDrawNumber->drawOpportunities = 0;
 		currentDrawNumber->average = 0.0;
 		currentDrawNumber->lastDrawn = 0;
 		currentDrawNumber->ordinalChance = 0.0;
@@ -150,7 +193,7 @@ void Analyse::init_all()
 		}
 
 		// Allocate memory for the next node
-		currentDrawNumber->_next = new DrawStatisticList;
+		currentDrawNumber->_next = new DrawNumberStatistics;
 		if (!currentDrawNumber->_next) {
 			cerr << "[Error] Failed to allocate memory for next DrawStatisticList node." << endl;
 			currentDrawNumber->_next = NULL;
@@ -169,25 +212,25 @@ void Analyse::init_all()
 	_ordinalBranchStart = new ordinalBranch;
 	_ordinalBranchStart->listNode = new ordinalListNode;
 	initialize_ordinal_list(_ordinalBranchStart->listNode);
-	_ordinalBranchStart->SampleSize = 0;
+	_ordinalBranchStart->sampleSize = 0;
 	_ordinalBranchStart->_previous = NULL;
 	_ordinalBranchStart->_next = NULL;
 
-	_totalNumbersDrawn = 0;
+	_totalDrawEvents = 0;
 	_ordinalBranchTotalNodes = 1;
 	_debugMode = true;
 	
 }
 void Analyse::display_draw_statistics() 
 {
-	DrawStatisticList* currentDraw;
+	DrawNumberStatistics* currentDraw;
 	currentDraw = _drawNumbersStart;
     std::cerr << "Draw Statistics (sorted by average):" << std::endl;
 	while(currentDraw != nullptr)
 	{
         std::cerr << "Draw Number: " << currentDraw->drawNumber
                   << " Total Drawn: " << currentDraw->totalTimesDrawn
-                  << " Opportunities: " << currentDraw->opportunities
+                  << " Opportunities: " << currentDraw->drawOpportunities
                   << " Average: " << currentDraw->average
 				  << " Ordinal Chance: " << currentDraw->ordinalChance
                   << " Last Drawn: " << currentDraw->lastDrawn << std::endl;
@@ -201,7 +244,7 @@ void Analyse::display_ordinal_lists() {
 	int OrdinalLevel = 1;
 	while(currentBranch != NULL)
 	{
-		std::cerr << "Ordinal Level "<<OrdinalLevel<<" sample size: "<<currentBranch->SampleSize<<" List:" << std::endl;
+		std::cerr << "Ordinal Level "<<OrdinalLevel<<" sample size: "<<currentBranch->sampleSize<<" List:" << std::endl;
 		ordinalListNode* currentOrdinal = currentBranch->listNode;
 		while (currentOrdinal != nullptr) {
 			std::cerr << "  Ordinal: " << currentOrdinal->ordinal
@@ -218,8 +261,8 @@ void Analyse::display_ordinal_lists() {
 void Analyse::sort_draws_average()
 {
     bool swapped;
-    DrawStatisticList *ptr1;
-    DrawStatisticList *lptr = nullptr;
+    DrawNumberStatistics *ptr1;
+    DrawNumberStatistics *lptr = nullptr;
 
     do {
         swapped = false;
@@ -230,7 +273,7 @@ void Analyse::sort_draws_average()
                 std::swap(ptr1->totalTimesDrawn, ptr1->_next->totalTimesDrawn);
                 std::swap(ptr1->drawNumber, ptr1->_next->drawNumber);
                 std::swap(ptr1->isDrawn, ptr1->_next->isDrawn);
-                std::swap(ptr1->opportunities, ptr1->_next->opportunities);
+                std::swap(ptr1->drawOpportunities, ptr1->_next->drawOpportunities);
                 std::swap(ptr1->average, ptr1->_next->average);
                 std::swap(ptr1->lastDrawn, ptr1->_next->lastDrawn);
                 swapped = true;
@@ -293,7 +336,7 @@ void Analyse::record_ordinal_opportunity(int ordinance, ordinalBranch*& Node)
 }
 void Analyse::analyse_all_draws()
 {
-    DrawStatisticList *listNumber;
+    DrawNumberStatistics *listNumber;
     listNumber = _drawNumbersStart;
     int drawCardSlot = 0;
     int drawListLocation = 0;
@@ -362,9 +405,9 @@ void Analyse::analyse_all_draws()
                 {
                     if (listNumber->drawNumber == ballNumber)
                     {
-						_totalNumbersDrawn++;
+						_totalDrawEvents++;
                         calculate_draw_event(listNumber);
-                        if (_totalNumbersDrawn > _drawSeedPool)
+                        if (_totalDrawEvents > _drawSampleSize)
                             calculate_ordinal_event(drawListLocation, _ordinalBranchStart);
                         
 						if(_debugMode)
@@ -372,8 +415,8 @@ void Analyse::analyse_all_draws()
                     } 
                     else 
 					{
-                        listNumber->opportunities++;
-						if (_totalNumbersDrawn > _drawSeedPool){
+                        listNumber->drawOpportunities++;
+						if (_totalDrawEvents > _drawSampleSize){
 							record_ordinal_opportunity(drawListLocation, _ordinalBranchStart);
 						}
                     }
@@ -394,7 +437,7 @@ void Analyse::analyse_all_draws()
         sort_draws_average();
 
         // If the first ordinal list is a stable size, perform sorting and clearing operations
-        if (_totalNumbersDrawn > _drawSeedPool){
+        if (_totalDrawEvents > _drawSampleSize){
             sort_ordinal_lists();
         }
     }
@@ -437,7 +480,7 @@ void Analyse::propagate_statistical_tree(int ordinance, double ordinalSum, ordin
 	}
 	// we are at the base branch node which refferences the rank in the draw list sorted by averages.
 	else {
-		DrawStatisticList* drawList;
+		DrawNumberStatistics* drawList;
 		drawList = _drawNumbersStart;
 		// find the draw number based on the ordinal position in the sorted draw list. Big To Do here. :) 
 		listOrdinance = 1;
@@ -473,15 +516,15 @@ void Analyse::calculate_ordinal_event(int ordinance, ordinalBranch*& Node)
 			currentListNode->landedTotal++;
 			currentListNode->opportunities++;
 			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / static_cast<double>(currentListNode->opportunities);
-			Node->SampleSize++;
+			Node->sampleSize++;
 			if(Node->_next != nullptr){
 				calculate_ordinal_event(OrdinalListLocation, Node->_next);
 			}
-			else if (Node->SampleSize > _ordinalSeedPool)
+			else if (Node->sampleSize > _ordinalSampleSize)
 			{
 				_ordinalBranchTotalNodes++;
 				Node->_next = new ordinalBranch;
-				Node->_next->SampleSize = 0;
+				Node->_next->sampleSize = 0;
 				Node->_next->_next = NULL;
 				Node->_next->_previous = Node;
 
@@ -531,12 +574,12 @@ void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
         }
     }
 }
-void Analyse::calculate_draw_event(DrawStatisticList*& Number)
+void Analyse::calculate_draw_event(DrawNumberStatistics*& Number)
 {
 	Number->totalTimesDrawn++;
-	Number->opportunities++;
-	Number->average = static_cast<double>(Number->totalTimesDrawn) / static_cast<double>(Number->opportunities);
-	Number->lastDrawn = _totalNumbersDrawn;
+	Number->drawOpportunities++;
+	Number->average = static_cast<double>(Number->totalTimesDrawn) / static_cast<double>(Number->drawOpportunities);
+	Number->lastDrawn = _totalDrawEvents;
 	Number->isDrawn = true;
 }
 bool Analyse::validate_draw_combination(Card PossibleCombinationCard)
