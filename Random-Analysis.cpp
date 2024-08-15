@@ -103,6 +103,12 @@ struct ordinalBranch{
 //   the relevant averages and propagating this information back through the chain of ordinal branches.
 };
 
+/*	TODO: Future updates to the `ordinalListNode` and `ordinalBranch` structs:
+- Consider introducing a child struct to encapsulate all calculated statistics (average, sigma, standard deviation, etc.).
+- This child struct will help organize the data and make it easier to extend the functionality of statistical propagation.
+- Each statistical metric (e.g., average, sigma, sd) should be updated consistently across the linked list of ordinal branches.
+- The `propagate_statistical_tree` function will need to be expanded to handle these additional metrics.*/
+
 // Struct to manage the configuration settings for the analysis program.
 // This struct holds file paths for important data files and a flag for enabling or disabling debug mode.
 struct Config {
@@ -437,8 +443,6 @@ This function is called from within analyse_all_draws().*/
     }
 }
 
-
-
 void Analyse::analyse_all_draws()
 {
 /* Function to analyze all draw events from a historical draw file.
@@ -586,21 +590,37 @@ Suggested function breakdown:
     cerr << "[Debug] Finished processing all draws." << endl;
 }
 
-void Analyse::correlate_data()
-{
-	ordinalBranch* currentBranch;
-	ordinalListNode* currentListNode;
-	currentBranch = _ordinalBranchStart;
-	while (currentBranch->_next != nullptr){
-		currentBranch = currentBranch->_next;
-	}
-	currentListNode = currentBranch->listNode;
-	while ( currentListNode != nullptr)
-	{
-		propagate_statistical_tree(currentListNode->ordinal,currentListNode->average,currentBranch->_previous);
-		currentListNode = currentListNode->_next;
-	}
+
+void Analyse::correlate_data(){
+/* Function to correlate data across the ordinal branches, starting from the last branch and moving backward.
+This function propagates statistical calculations (currently the average) from the last ordinal branch
+back through the previous branches. Future expansions will likely include other statistical metrics
+such as sigma, standard deviation (sd), and others, requiring updates to the data structures.*/
+
+    ordinalBranch* currentBranch;        // Pointer to traverse the ordinal branches.
+    ordinalListNode* currentListNode;    // Pointer to traverse the ordinal list nodes within a branch.
+    currentBranch = _ordinalBranchStart;
+
+    // Traverse to the last ordinal branch in the linked list.
+    while (currentBranch->_next != nullptr){
+        currentBranch = currentBranch->_next;
+    }
+
+    // Start at the last branch's list and iterate through its ordinal list nodes.
+    currentListNode = currentBranch->listNode;
+    while (currentListNode != nullptr)
+    {
+        // Propagate the average from the current list node to the previous branches.
+        // Currently, this only handles the average, but future versions will need to handle
+        // other statistical calculations (e.g., sigma, standard deviation).
+        propagate_statistical_tree(currentListNode->ordinal, currentListNode->average, currentBranch->_previous);
+
+        // Move to the next node in the ordinal list.
+        currentListNode = currentListNode->_next;
+    }
 }
+
+
 void Analyse::propagate_statistical_tree(int ordinance, double ordinalSum, ordinalBranch*& branchNode)
 {
 	ordinalListNode* currentListNode;
