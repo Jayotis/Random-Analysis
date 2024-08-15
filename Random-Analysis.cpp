@@ -103,11 +103,20 @@ struct ordinalBranch{
 //   the relevant averages and propagating this information back through the chain of ordinal branches.
 };
 
+// Struct to manage the configuration settings for the analysis program.
+// This struct holds file paths for important data files and a flag for enabling or disabling debug mode.
 struct Config {
-    string combinationCollectionFile;
-    string drawHistoryFile;
-    bool debugMode;
+    string combinationCollectionFile;  // Path to the file that stores the collection of combinations.
+                                       // This file contains precomputed or collected combinations used in the analysis.
+    string drawHistoryFile;            // Path to the file that stores the history of draws.
+                                       // This CSV file contains the historical draw data in a specific order (e.g., new_draw_order.csv).
+    bool debugMode;                    // Flag to enable or disable debug mode.
+                                       // When set to true, additional debug information will be logged or displayed.
 
+    // Constructor to initialize the configuration with default values.
+    // - combinationCollectionFile is initialized to "./combinationCollectionFile.dat"
+    // - drawHistoryFile is initialized to "./new_draw_order.csv"
+    // - debugMode is initialized to false (debug mode off by default)
     Config() : combinationCollectionFile("./combinationCollectionFile.dat"),
                drawHistoryFile("./new_draw_order.csv"),
                debugMode(false) {}
@@ -163,289 +172,420 @@ public:
 	bool _debugMode;
 };
 
-void Analyse::init_all()
-{
-	// Initialize the linked list
-	_drawNumbersStart = new DrawNumberStatistics;
-	if (!_drawNumbersStart) {
-		cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
-		return; // You may want to handle this more gracefully in your actual application
-	}
 
-	DrawNumberStatistics *currentDrawNumber = _drawNumbersStart;
-	int ballValue = 0;
+void Analyse::init_all() {
+// Function to initialize all necessary data structures and settings for the analysis.
 
-	do {
-		// Initialize the current node
-		currentDrawNumber->totalTimesDrawn = 0;
-		currentDrawNumber->drawNumber = (ballValue + 1);
-		currentDrawNumber->isDrawn = false;
-		currentDrawNumber->drawOpportunities = 0;
-		currentDrawNumber->average = 0.0;
-		currentDrawNumber->lastDrawn = 0;
-		currentDrawNumber->ordinalChance = 0.0;
+    // Initialize the linked list for draw number statistics.
+    _drawNumbersStart = new DrawNumberStatistics;
+    if (!_drawNumbersStart) {
+        cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
+        return; // Consider more graceful error handling in production code.
+    }
 
-		ballValue++;
+    DrawNumberStatistics *currentDrawNumber = _drawNumbersStart;
+    int ballValue = 0;
 
-		if (ballValue == _drawRange) {
-			currentDrawNumber->_next = NULL;
-			break;
-		}
+    // Loop to initialize each draw number's statistics.
+    while (ballValue < _drawRange) {
+        // Initialize the current node's data.
+        currentDrawNumber->totalTimesDrawn = 0;
+        currentDrawNumber->drawNumber = ballValue + 1; // Assign draw number.
+        currentDrawNumber->isDrawn = false;
+        currentDrawNumber->drawOpportunities = 0;
+        currentDrawNumber->average = 0.0;
+        currentDrawNumber->lastDrawn = 0;
+        currentDrawNumber->ordinalChance = 0.0;
 
-		// Allocate memory for the next node
-		currentDrawNumber->_next = new DrawNumberStatistics;
-		if (!currentDrawNumber->_next) {
-			cerr << "[Error] Failed to allocate memory for next DrawStatisticList node." << endl;
-			currentDrawNumber->_next = NULL;
-			break; // Exit the loop if memory allocation fails
-		}
+        ballValue++;
 
-		// Move to the next node
-		currentDrawNumber = currentDrawNumber->_next;
+        // Check if we've reached the last draw number.
+        if (ballValue == _drawRange) {
+            currentDrawNumber->_next = nullptr; // End the list.
+            break;
+        }
 
-	} while (ballValue < _drawRange);
+        // Allocate memory for the next node in the list.
+        currentDrawNumber->_next = new DrawNumberStatistics;
+        if (!currentDrawNumber->_next) {
+            cerr << "[Error] Failed to allocate memory for the next DrawNumberStatistics node." << endl;
+            currentDrawNumber->_next = nullptr;
+            break; // Exit the loop if memory allocation fails.
+        }
 
-	_totalValidCombinationCards = 0;
+        // Move to the next node.
+        currentDrawNumber = currentDrawNumber->_next;
+    }
 
-	//create the draw history list from file.
+    // Initialize other necessary members.
+    _totalValidCombinationCards = 0; // Initialize the count of valid combination cards.
 
-	_ordinalBranchStart = new ordinalBranch;
-	_ordinalBranchStart->listNode = new ordinalListNode;
-	initialize_ordinal_list(_ordinalBranchStart->listNode);
-	_ordinalBranchStart->sampleSize = 0;
-	_ordinalBranchStart->_previous = NULL;
-	_ordinalBranchStart->_next = NULL;
-
-	_totalDrawEvents = 0;
-	_ordinalBranchTotalNodes = 1;
-	_debugMode = true;
+    // Initialize the ordinal branch structure.
+    _ordinalBranchStart = new ordinalBranch;
+    // Set initial values for the ordinal branch.
+    _ordinalBranchStart->sampleSize = 0;
+    _ordinalBranchStart->_previous = nullptr;
+    _ordinalBranchStart->_next = nullptr;
 	
+    _ordinalBranchStart->listNode = new ordinalListNode;
+    // Initialize the first ordinal list.
+    initialize_ordinal_list(_ordinalBranchStart->listNode);
+
+    // Initialize other relevant counters and flags.
+    _totalDrawEvents = 0;
+    _ordinalBranchTotalNodes = 1;
+    _debugMode = true;
 }
+
 void Analyse::display_draw_statistics() 
 {
+/* Function to display the draw statistics for each number.
+ This function iterates through the linked list of draw statistics, 
+ starting from _drawNumbersStart, and prints out the relevant information 
+ for each draw number.*/
+
+    // Start with the first draw number in the linked list.
 	DrawNumberStatistics* currentDraw;
 	currentDraw = _drawNumbersStart;
+
+    // Print the header for the statistics display.
     std::cerr << "Draw Statistics (sorted by average):" << std::endl;
+
+    // Iterate through the linked list of draw statistics.
 	while(currentDraw != nullptr)
 	{
-        std::cerr << "Draw Number: " << currentDraw->drawNumber
-                  << " Total Drawn: " << currentDraw->totalTimesDrawn
-                  << " Opportunities: " << currentDraw->drawOpportunities
-                  << " Average: " << currentDraw->average
-				  << " Ordinal Chance: " << currentDraw->ordinalChance
-                  << " Last Drawn: " << currentDraw->lastDrawn << std::endl;
+        // Output the statistics for the current draw number.
+        std::cerr << "Draw Number: " << currentDraw->drawNumber          // The draw number being reported.
+                  << " Total Drawn: " << currentDraw->totalTimesDrawn    // The total number of times this number has been drawn.
+                  << " Opportunities: " << currentDraw->drawOpportunities// The number of opportunities this number had to be drawn.
+                  << " Average: " << currentDraw->average                // The average position of this number in all draws.
+				  << " Ordinal Chance: " << currentDraw->ordinalChance    // The calculated chance of this number being drawn in its ordinal position.
+                  << " Last Drawn: " << currentDraw->lastDrawn << std::endl; // The last draw number in which this number was drawn.
+
+        // Move to the next draw number in the linked list.
 		currentDraw = currentDraw->_next;
 	}
-
 }
+
 void Analyse::display_ordinal_lists() {
-	ordinalBranch* currentBranch;
-	currentBranch = _ordinalBranchStart;
-	int OrdinalLevel = 1;
-	while(currentBranch != NULL)
-	{
-		std::cerr << "Ordinal Level "<<OrdinalLevel<<" sample size: "<<currentBranch->sampleSize<<" List:" << std::endl;
-		ordinalListNode* currentOrdinal = currentBranch->listNode;
-		while (currentOrdinal != nullptr) {
-			std::cerr << "  Ordinal: " << currentOrdinal->ordinal
-					<< " Average: " << currentOrdinal->average
-					<< " Landed Total: " << currentOrdinal->landedTotal
-					<< " Opportunities: " << currentOrdinal->opportunities << std::endl;
-			currentOrdinal = currentOrdinal->_next;
-		}
-		std::cerr<<std::endl;
-		currentBranch = currentBranch->_next;
-		OrdinalLevel++;
-	}
-}
-void Analyse::sort_draws_average()
-{
-    bool swapped;
-    DrawNumberStatistics *ptr1;
-    DrawNumberStatistics *lptr = nullptr;
+// Function to display the ordinal lists for each branch in the ordinal branch structure.
+// This function iterates through the linked list of ordinal branches, starting from _ordinalBranchStart,
+// and prints out the relevant information for each ordinal list at each level.
 
+    // Start with the first ordinal branch in the linked list.
+    ordinalBranch* currentBranch;
+    currentBranch = _ordinalBranchStart;
+    int OrdinalLevel = 1; // Track the rank of the ordinal branch list (starting from 1).
+
+    // Iterate through the linked list of ordinal branches.
+    while(currentBranch != NULL)
+    {
+        // Print the level and sample size for the current ordinal branch.
+        std::cerr << "Ordinal Level " << OrdinalLevel << " sample size: " << currentBranch->sampleSize << " List:" << std::endl;
+        
+        // Start with the first ordinal list node in the current branch.
+        ordinalListNode* currentOrdinal = currentBranch->listNode;
+
+        // Iterate through the linked list of ordinal list nodes in the current branch.
+        while (currentOrdinal != nullptr) {
+            // Output the statistics for the current ordinal.
+            std::cerr << "  Ordinal: " << currentOrdinal->ordinal          // The ordinal position being reported.
+                    << " Average: " << currentOrdinal->average            // The average probability for this ordinal position.
+                    << " Landed Total: " << currentOrdinal->landedTotal   // The total number of times a number has landed in this ordinal position.
+                    << " Opportunities: " << currentOrdinal->opportunities << std::endl; // The number of opportunities this ordinal position had.
+
+            // Move to the next ordinal list node in the current branch.
+            currentOrdinal = currentOrdinal->_next;
+        }
+
+        std::cerr << std::endl; // Print a newline for readability between levels.
+
+        // Move to the next ordinal branch in the linked list.
+        currentBranch = currentBranch->_next;
+        OrdinalLevel++; // Increment the ordinal level counter.
+    }
+}
+
+
+void Analyse::sort_draws_average() {
+/* Function to sort the linked list of draw statistics based on the 'average' field.
+   This function uses a modified bubble sort algorithm to arrange the draw numbers
+   in ascending order of their average draw position. */
+
+    bool swapped; // Flag to track if any swaps were made during the iteration.
+    DrawNumberStatistics *ptr1; // Pointer used to traverse the list.
+    DrawNumberStatistics *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
+
+    // Repeat the sorting process until no swaps are made (i.e., the list is sorted).
     do {
         swapped = false;
-        ptr1 = _drawNumbersStart;
+        ptr1 = _drawNumbersStart; // Start from the beginning of the list.
 
+        // Traverse the list until the last sorted element (lptr).
         while (ptr1->_next != lptr) {
+            // Compare the average of the current node with the next node.
             if (ptr1->average > ptr1->_next->average) {
+                // If the current node's average is greater, swap the entire contents of the nodes.
                 std::swap(ptr1->totalTimesDrawn, ptr1->_next->totalTimesDrawn);
                 std::swap(ptr1->drawNumber, ptr1->_next->drawNumber);
                 std::swap(ptr1->isDrawn, ptr1->_next->isDrawn);
                 std::swap(ptr1->drawOpportunities, ptr1->_next->drawOpportunities);
                 std::swap(ptr1->average, ptr1->_next->average);
                 std::swap(ptr1->lastDrawn, ptr1->_next->lastDrawn);
-                swapped = true;
+				std::swap(ptr1->ordinalChance, ptr1->_next->ordinalChance);
+                
+                swapped = true; // Indicate that a swap was made.
             }
-            ptr1 = ptr1->_next;
+            ptr1 = ptr1->_next; // Move to the next node in the list.
         }
+
+        // Mark the end of the sorted portion of the list.
         lptr = ptr1;
+
+    // Continue the process as long as swaps are being made.
     } while (swapped);
 }
-void Analyse::sort_ordinal_average(ordinalBranch*& Head)
-{
+
+void Analyse::sort_ordinal_average(ordinalBranch*& Head) {
+/* Function to sort the ordinal list within a given ordinal branch based on the 'average' field.
+This function uses a modified bubble sort algorithm to arrange the ordinal list nodes
+in ascending order of their average probability values. */
+
+    // If the head of the ordinal branch is null, there is nothing to sort.
     if (Head == nullptr) return;
 
-    bool swapped;
-    ordinalListNode *ptr1;
-    ordinalListNode *lptr = nullptr;
+    bool swapped; // Flag to track if any swaps were made during the iteration.
+    ordinalListNode *ptr1; // Pointer used to traverse the list.
+    ordinalListNode *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
 
+    // Repeat the sorting process until no swaps are made (i.e., the list is sorted).
     do {
         swapped = false;
-        ptr1 = Head->listNode;
+        ptr1 = Head->listNode; // Start from the beginning of the ordinal list.
 
+        // Traverse the list until the last sorted element (lptr).
         while (ptr1->_next != lptr) {
+            // Compare the average of the current node with the next node.
             if (ptr1->average > ptr1->_next->average) {
+                // If the current node's average is greater, swap the entire contents of the nodes.
                 std::swap(ptr1->landedTotal, ptr1->_next->landedTotal);
                 std::swap(ptr1->ordinal, ptr1->_next->ordinal);
                 std::swap(ptr1->isDrawn, ptr1->_next->isDrawn);
                 std::swap(ptr1->opportunities, ptr1->_next->opportunities);
                 std::swap(ptr1->average, ptr1->_next->average);
-                swapped = true;
+                std::swap(ptr1->ordinalChance, ptr1->_next->ordinalChance); // Swap ordinalChance as well.
+                
+                swapped = true; // Indicate that a swap was made.
             }
-            ptr1 = ptr1->_next;
+            ptr1 = ptr1->_next; // Move to the next node in the list.
         }
+
+        // Mark the end of the sorted portion of the list.
         lptr = ptr1;
+
+    // Continue the process as long as swaps are being made.
     } while (swapped);
 }
+
+
 void Analyse::record_ordinal_opportunity(int ordinance, ordinalBranch*& Node)
 {
-	ordinalBranch* currentBranch;
-	ordinalListNode* currentListNode;
-	currentBranch = Node;
-	int listOrdinance = 1;
-	currentListNode = currentBranch->listNode;
-	while(currentListNode != nullptr)
-	{
-		if(currentListNode->ordinal == ordinance)
-		{
-			currentListNode->opportunities++;
-			currentListNode->average = static_cast<double>(currentListNode->landedTotal) / static_cast<double>(currentListNode->opportunities);
-			if(Node->_next != nullptr){
-				record_ordinal_opportunity(listOrdinance, Node->_next);
-			}
-			return;
-		}
-		else 
-		{
-			currentListNode = currentListNode->_next;
-			listOrdinance++;
-		}
-	}
+/* Function to record an opportunity for a specific ordinal position (rank) in the linked ordinal branches.
+This is a recursive function that takes a rank position (ordinance) of a sorted list and increments the 
+opportunities count for that position if it could have been drawn but wasn't. 
+The function then propagates this opportunity recording through all linked ordinal branches, 
+ensuring that every relevant ordinal list node is updated across all levels.
+
+This function is called from within analyse_all_draws().*/
+
+    // Initialize pointers to traverse the current branch and its ordinal list.
+    ordinalBranch* currentBranch = Node;          // Start with the provided branch (Node).
+    ordinalListNode* currentListNode = currentBranch->listNode;  // Start with the head of the ordinal list.
+    int listOrdinance = 1;  // This counter tracks the position within the current list.
+
+    // Traverse through the ordinal list nodes in the current branch.
+    while(currentListNode != nullptr)
+    {
+        // Check if the current node's ordinal matches the target ordinance.
+        if(currentListNode->ordinal == ordinance)
+        {
+            // This ordinal position corresponds to the one that could have been drawn but wasn't.
+            // Increment the opportunities count for this ordinal position.
+            currentListNode->opportunities++;
+
+            // Update the average probability for this ordinal position.
+            // The average is recalculated as the ratio of the times this ordinal has landed
+            // to the number of opportunities it has had.
+            currentListNode->average = static_cast<double>(currentListNode->landedTotal) 
+                                      / static_cast<double>(currentListNode->opportunities);
+
+            // If there is a subsequent ordinal branch in the linked list (_next is not nullptr),
+            // recursively call this function to propagate the opportunity recording.
+            if(Node->_next != nullptr){
+                record_ordinal_opportunity(listOrdinance, Node->_next);
+            }
+
+            // Exit the recursion once the opportunity is recorded and propagated.
+            return;
+        }
+        else 
+        {
+            // Move to the next ordinal list node in the current branch.
+            currentListNode = currentListNode->_next;
+            listOrdinance++; // Increment the list ordinance counter to reflect the position.
+        }
+    }
 }
+
+
+
 void Analyse::analyse_all_draws()
 {
-    DrawNumberStatistics *listNumber;
-    listNumber = _drawNumbersStart;
-    int drawCardSlot = 0;
-    int drawListLocation = 0;
-    int ballNumber = 0;
-    int ballsDrawn = 0;  
-    string drawDate = "";
-    string line;
+/* Function to analyze all draw events from a historical draw file.
+This function processes each draw in the file, updates the draw statistics,
+records ordinal opportunities, and sorts the draw and ordinal lists as needed.
+TODO: Refactor this function into smaller functions for better clarity and maintainability.
+Suggested function breakdown:
+1. A function to read and process the draw history file line by line.
+2. A function to process each individual draw (ball number by ball number).
+3. A function to record opportunities for unmatched numbers.
+4. A function to update statistics and calculate probabilities for matched numbers.
+5. A function to reset flags and sort lists after processing each draw.*/
 
-    // Open the file with error checking
+    DrawNumberStatistics *listNumber;  // Pointer to traverse the linked list of draw statistics.
+    listNumber = _drawNumbersStart;    // Start from the head of the draw numbers list.
+    int drawCardSlot = 0;              // Counter for the position within the current draw.
+    int drawListLocation = 0;          // Location in the draw statistics list.
+    int ballNumber = 0;                // The current ball number being processed.
+    int ballsDrawn = 0;                // Count of balls drawn in a draw (not used in this snippet).
+    string drawDate = "";              // Variable to store the date of the draw.
+    string line;                       // String to hold each line read from the file.
+
+    // Open the draw history file with error checking.
     ifstream file(_drawHistoryFile);
     if (!file.is_open()) {
         cerr << "[Error] Failed to open file: " << _drawHistoryFile << endl;
         return;
     }
-	if (_debugMode)
-    	cerr << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
+    if (_debugMode)
+        cerr << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
 
+    // Skip the header line of the CSV file if present.
     if (getline(file, line)) {
         if (_debugMode)
             cerr << "[Debug] Skipping header line: " << line << endl;
     }
 
-    // Read each line from the file
+    // TODO: Consider refactoring this loop into a separate function: process_draw_line()
+    // Read and process each line (draw event) from the file.
     while (getline(file, line)) 
     {
         if (line.empty()) {
             cerr << "[Warning] Skipping empty line in file." << endl;
             continue;
         }
-        stringstream ss(line);
+        stringstream ss(line); // Use stringstream to parse the line.
 
-        drawCardSlot = 0;
+        drawCardSlot = 0; // Reset the slot counter for each draw.
 
-        // Read the draw date
+        // Read the draw date.
         if (!getline(ss, drawDate, ',')) {
             cerr << "[Error] Failed to read draw date from line: " << line << endl;
             continue;
         }
-		
-
-        // Process each ball number in the draw
-        while (getline(ss, line, ',')) // Use a temporary line variable to hold each ball number
+        
+        // TODO: Consider refactoring this loop into a separate function: process_draw_number()
+        // Process each ball number in the current draw.
+        while (getline(ss, line, ',')) // Parse each ball number in the draw.
         {
             try {
-                ballNumber = stoi(line); // Convert the string to an integer
+                ballNumber = stoi(line); // Convert the string to an integer.
             } catch (const invalid_argument& e) {
                 cerr << "[Error] Invalid ball number in line: " << line << endl;
                 continue;
             }
 
-            if (drawCardSlot >= _drawCardSize) {  // Assuming MAX_DRAW_SLOTS is defined
+            // Check if we exceed the expected number of slots for a draw.
+            if (drawCardSlot >= _drawCardSize) {  // Assuming _drawCardSize is defined elsewhere.
                 cerr << "[Error] Exceeded maximum draw slots for date: " << drawDate << endl;
                 break;
             }
 
+            // Record the ball number in the appropriate slot.
             _lastDraw[drawCardSlot] = ballNumber;
             if(_debugMode)
-            	cerr << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << endl;
+                cerr << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << endl;
 
-            listNumber = _drawNumbersStart;
-            drawListLocation = 1;
+            // Reset list traversal variables.
+            listNumber = _drawNumbersStart; // Start from the beginning of the draw statistics list.
+            drawListLocation = 1; // Location counter starts at 1.
 
+            // TODO: Consider refactoring this loop into two separate functions:
+            // 1. update_matched_number_statistics() - for when the number matches.
+            // 2. record_opportunity_for_unmatched() - for when the number doesn't match.
+            // Traverse the draw statistics list to update each draw number's stats.
             while(listNumber != NULL)
             {
+                // If this number hasn't been drawn yet, process it.
                 if (!listNumber->isDrawn)
                 {
+                    // Check if the current ball matches the draw number in the list.
                     if (listNumber->drawNumber == ballNumber)
                     {
-						_totalDrawEvents++;
+                        _totalDrawEvents++; // Increment total draw events counter.
+                        
+                        // Perform draw event calculations for the matched number.
                         calculate_draw_event(listNumber);
+                        
+                        // If enough draws have occurred, calculate ordinal events.
                         if (_totalDrawEvents > _drawSampleSize)
                             calculate_ordinal_event(drawListLocation, _ordinalBranchStart);
                         
-						if(_debugMode)
-                        	cerr << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << endl;
+                        if(_debugMode)
+                            cerr << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << endl;
                     } 
                     else 
-					{
+                    {
+                        // For unmatched numbers, increment their opportunities.
                         listNumber->drawOpportunities++;
-						if (_totalDrawEvents > _drawSampleSize){
-							record_ordinal_opportunity(drawListLocation, _ordinalBranchStart);
-						}
+                        
+                        // Record ordinal opportunities for unmatched numbers.
+                        if (_totalDrawEvents > _drawSampleSize) {
+                            record_ordinal_opportunity(drawListLocation, _ordinalBranchStart);
+                        }
                     }
                 }
+                // Move to the next draw number in the list.
                 listNumber = listNumber->_next;
                 drawListLocation++;
             } 
-            drawCardSlot++; 
+            drawCardSlot++; // Move to the next slot in the draw.
         }
         
-        // Reset IsDrawn flag for all DrawNumbers
+        // TODO: Refactor into a function to reset flags and sort the lists: reset_and_sort_after_draw()
+        // Reset the isDrawn flag for all draw numbers for the next draw.
         listNumber = _drawNumbersStart;
         while (listNumber != NULL)
         {
-            listNumber->isDrawn = false;
+            listNumber->isDrawn = false; // Reset the flag.
             listNumber = listNumber->_next;
         }
+
+        // Sort the draw statistics list based on the updated averages.
         sort_draws_average();
 
-        // If the first ordinal list is a stable size, perform sorting and clearing operations
+        // If the total number of draw events exceeds the sample size, 
+        // sort the ordinal lists and perform any necessary operations.
         if (_totalDrawEvents > _drawSampleSize){
             sort_ordinal_lists();
         }
     }
 
-    // Close the file
+    // Close the file after processing all draws.
     file.close();
     cerr << "[Debug] Finished processing all draws." << endl;
 }
+
 void Analyse::correlate_data()
 {
 	ordinalBranch* currentBranch;
@@ -545,7 +685,7 @@ void Analyse::initialize_ordinal_list(ordinalListNode*& Head)
         ordinals[i] = i + 1;
     }
 
-    // Shuffle the vector to get a random permutation
+    // Shuffle the vector to get a random permutation. (This is all not needed, to change)
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::shuffle(ordinals.begin(), ordinals.end(), std::default_random_engine(seed));
 
