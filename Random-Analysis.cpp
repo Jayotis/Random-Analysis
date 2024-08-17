@@ -1,6 +1,7 @@
 // Analyse.cpp : Defines the entry point for the console application.
 //
-
+#include <sstream>
+#include <string>
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -26,6 +27,7 @@ const int _drawSampleSize = 500;		// A certain amount of draws that produce a so
 const int _ordinalSampleSize = 500;		// same as above but for the ordinal lists.
 char _primeNumbers[15] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
 using DrawMatrix = std::vector<std::vector<int>>;
+using DrawSet = std::vector<int>;
 
 // Define a struct to hold statistics for each number.
 struct DrawStatisticNode{
@@ -200,11 +202,11 @@ public:
 
     // Function to extract a draw from a line of text in the draw history file.
     // Takes a string (line) as input and returns a DrawMatrix containing the parsed draw numbers.
-    DrawMatrix extract_draw_vector(const std::string&);
+    DrawSet extract_draw_vector(const std::string& line);
 
     // Function to process a single draw vector, updating statistics and events.
     // Takes a vector of integers (representing a single draw) as input.    
-    void process_draw_vector(const std::vector<int>&);
+    void process_draw_vector(DrawSet);
 
     // Function to reset flags and other state indicators after processing a draw.
     // This is typically used to reset the `isDrawn` flags in the draw statistics list.
@@ -303,7 +305,7 @@ void Analyse::init_all() {
         cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
         return; // Consider more graceful error handling in production code.
     }
-
+    _lastDraw.push_back(DrawSet(_drawCardSize, 0)); // Initialize a new draw set in _lastDraw if needed
     DrawStatisticNode *currentDrawNumber = _drawTreeStart;
     int ballValue = 0;
     int _totalEvents = 0;
@@ -555,8 +557,8 @@ This function is called from within analyse_all_draws().*/
     }
 }
 
-void Analyse::process_draw_vector(const std::vector<int>& draw) {
-    DrawStatisticNode* listNumber; // Pointer to traverse the linked list of draw statistics.
+void Analyse::process_draw_vector(DrawSet draw) {
+    DrawStatisticNode* numberNode; // Pointer to traverse the linked list of draw statistics.
     int drawCardSlot = 0;          // Counter for the position within the current draw.
     int drawListLocation = 0;      // Location in the draw statistics list.
 
@@ -566,16 +568,16 @@ void Analyse::process_draw_vector(const std::vector<int>& draw) {
         if (_debugMode)
             std::cout << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << std::endl;
 
-        listNumber = _drawTreeStart; // Start from the beginning of the draw statistics list
+        numberNode = _drawTreeStart; // Start from the beginning of the draw statistics list
         drawListLocation = 1;           // Location counter starts at 1
 
         // Traverse the draw statistics list to update statistics for each draw number
-        while (listNumber != NULL) {
-            if (!listNumber->isDrawn) { // Process only if the number has not already been drawn in this draw
-                if (listNumber->drawNumber == ballNumber) 
+        while (numberNode != NULL) {
+            if (!numberNode->isDrawn) { // Process only if the number has not already been drawn in this draw
+                if (numberNode->drawNumber == ballNumber) 
                 {
                     _totalEvents++; // Increment total draw events counter
-                    calculate_draw_event(listNumber); // Perform draw event calculations for the matched number
+                    calculate_draw_event(numberNode); // Perform draw event calculations for the matched number
 
                     // If seeding is complete, calculate ordinal events for the matched number
                     if ( _seeded ) {
@@ -587,7 +589,7 @@ void Analyse::process_draw_vector(const std::vector<int>& draw) {
                 } 
 				else 
 				{
-                    listNumber->drawOpportunities++; // Increment opportunities for unmatched numbers
+                    numberNode->drawOpportunities++; // Increment opportunities for unmatched numbers
 
                     // If seeding is complete, record ordinal opportunities for unmatched numbers
                     if ( _seeded ) {
@@ -595,7 +597,7 @@ void Analyse::process_draw_vector(const std::vector<int>& draw) {
                     }
                 }
             }
-            listNumber = listNumber->_next; // Move to the next draw number in the list
+            numberNode = numberNode->_next; // Move to the next draw number in the list
             drawListLocation++;
         }
         drawCardSlot++; // Move to the next slot in the draw
@@ -616,16 +618,9 @@ void Analyse::process_draw_vector(const std::vector<int>& draw) {
 void Analyse::analyse_all_draws(){
 /* Function to analyze all draw events from a historical draw file.
 This function processes each draw in the file, updates the draw statistics,
-records ordinal opportunities, and sorts the draw and ordinal lists as needed.
-TODO: Refactor this function into smaller functions for better clarity and maintainability.
-Suggested function breakdown:
-1. A function to read and process the draw history file line by line.
-2. A function to process each individual draw (ball number by ball number).
-3. A function to record opportunities for unmatched numbers.
-4. A function to update statistics and calculate probabilities for matched numbers.
-5. A function to reset flags and sort lists after processing each draw.*/
+records ordinal opportunities, and sorts the draw and ordinal lists as needed.*/
 
-    DrawStatisticNode* listNumber; // Pointer to traverse the linked list of draw statistics.
+    DrawStatisticNode* numberNode; // Pointer to traverse the linked list of draw statistics.
     int totalDraws = 0;            // Counter for the total number of draws processed.
     int drawLimit;                 // Limit for the number of draws to process.
     string line;                   // String to hold each line read from the file.
@@ -652,24 +647,18 @@ Suggested function breakdown:
         getline(file, line);
         stringstream ss(line);
 
+        // Extract the draw data into a DrawMatrix (vector of vectors).
+        DrawSet drawData = extract_draw_vector(line);
+
+        // Process the draw data using the draw vector.
+        process_draw_vector(drawData);
+
+        totalDraws++; // Increment the total draws counter.
         // Determine if the draw events should start affecting the ordinal list calculations.
         if (!_seeded) {
             if (totalDraws > _drawSampleSize)
                 _seeded = true;
         }
-
-        // Extract the draw data into a DrawMatrix (vector of vectors).
-        DrawMatrix drawData = extract_draw_vector(line);
-
-        // If drawData is empty, skip this line and continue to the next one.
-        if (drawData.empty()) continue;
-
-        drawSlot = 0; // Reset the slot counter for the current draw.
-
-        // Process the draw data using the draw vector.
-        process_draw_vector(drawData[0]);
-
-        totalDraws++; // Increment the total draws counter.
     }
 
     // Collect the remaining draws for testing.
@@ -1019,36 +1008,33 @@ Potential future calculations might include:
 - Log or record additional metadata related to the draw event, such as draw date or position in the draw.*/
 }
 
-DrawMatrix extract_draw_vector(const std::string& line) {
-    DrawMatrix drawData;              // Initialize an empty DrawMatrix to store the draw data.
-    std::vector<int> draw;            // Vector to hold the individual ball numbers for the current draw.
-    std::stringstream ss(line);       // Create a stringstream to parse the input line.
-    std::string drawDate;             // Variable to store the draw date (which will be skipped).
-    std::string ballStr;              // Variable to hold each ball number as a string.
+DrawSet Analyse::extract_draw_vector(const std::string& line) {
+    DrawSet draw;                   // Initialize an empty DrawSet to store the ball numbers.
+    std::stringstream ss(line);     // Create a stringstream to parse the input line.
+    std::string drawDate;           // Variable to store the draw date (which will be skipped).
+    std::string ballStr;            // Variable to hold each ball number as a string.
 
     // Attempt to read and skip the draw date, which is the first value in the line.
-    // If the draw date cannot be read, output an error message and return an empty DrawMatrix.
+    // If the draw date cannot be read, output an error message and return an empty DrawSet.
     if (!getline(ss, drawDate, ',')) {
         std::cerr << "[Error] Failed to read draw date from line: " << line << std::endl;
-        return drawData; // Return an empty DrawMatrix if there's an error
+        return draw; // Return an empty DrawSet if there's an error
     }
 
     // Process each ball number in the draw by reading the remaining values in the line.
     while (getline(ss, ballStr, ',')) {
         try {
             int ballNumber = std::stoi(ballStr); // Convert the string representation of the ball number to an integer.
-            draw.push_back(ballNumber);          // Add the ball number to the draw vector.
+            draw.push_back(ballNumber);          // Add the ball number directly to the DrawSet.
         } catch (const std::invalid_argument&) {
             // If the conversion fails (e.g., the value is not a valid integer), output an error message
-            // and return an empty DrawMatrix, as this indicates invalid data.
+            // and return an empty DrawSet, as this indicates invalid data.
             std::cerr << "[Error] Invalid ball number in line: " << ballStr << std::endl;
-            return drawData; // Return an empty DrawMatrix if there's an error
+            return draw; // Return an empty DrawSet if there's an error
         }
     }
 
-    // After successfully processing all ball numbers, add the draw vector to the DrawMatrix.
-    drawData.push_back(draw);
-    return drawData; // Return the populated DrawMatrix.
+    return draw; // Return the populated DrawSet.
 }
 
 bool Analyse::validate_draw_combination(Card PossibleCombinationCard)
@@ -1333,7 +1319,7 @@ if (config.debugMode) {
             std::cerr << "Error opening combination file: " << drawData._combinationCollectionFile << " (" << strerror(errno) << ")" << std::endl;
             std::cerr << "Creating new combinations..." << std::endl;
         }
-        drawData.create_all_combinations();
+    //    drawData.create_all_combinations();
     } else {
         if (config.debugMode) {
             std::cerr << "Combination file opened successfully: " << drawData._combinationCollectionFile << std::endl;
