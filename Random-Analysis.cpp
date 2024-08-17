@@ -10,6 +10,7 @@
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <regex>
 
 #define _USE_MATH_DEFINES
 #ifdef _DEBUG
@@ -17,17 +18,17 @@
 #endif
 
 using namespace std;
-
+using Card = int [7];
 // Define constants related to Lotto 649.
 const int _drawRange = 49;		// The range of numbers that can be drawn (1-49).
 const int _drawCardSize = 7;		// The number of numbers drawn in each draw (6 + 1 bonus).
 const int _drawSampleSize = 500;		// A certain amount of draws that produce a somewhat stable(numbers don't move around wild) list. 
 const int _ordinalSampleSize = 500;		// same as above but for the ordinal lists.
 char _primeNumbers[15] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
-typedef int Card[_drawCardSize];
+using DrawMatrix = std::vector<std::vector<int>>;
 
 // Define a struct to hold statistics for each number.
-struct DrawNumberStatistics{
+struct DrawStatisticNode{
 
 	int totalTimesDrawn;		// How many times this number has been drawn.
 	int drawNumber;				// The number itself.
@@ -36,10 +37,10 @@ struct DrawNumberStatistics{
 	int drawOpportunities; 			// Each attempt to draw this number from the avaliable balls. 
 	double average;				// the average as times drawn over total opportunities.
 	int lastDrawn;				// The amount of draws that have past since it was last drawn.
-	DrawNumberStatistics *_next;
+	DrawStatisticNode *_next;
 };
 
-struct ordinalListNode {
+struct OrdinalStatisticNode {
 /* Struct to represent the data for a specific ordinal position in a draw probability list.
 This list contains 49 elements, each element referencing a rank (ordinal) in another list
 of 49 elements that are sorted by probability. The referenced list could be a list of draw
@@ -58,7 +59,7 @@ numbers or another list of ordinal positions (ordinal list).*/
     bool isDrawn;        // Flag indicating whether the number was actually drawn in this position during the current draw sequence.
     
     // Pointer to the next node in the linked list, representing the next ordinal position.
-    ordinalListNode *_next;
+    OrdinalStatisticNode *_next;
 /* end of struct
 
 Detailed Explanation:
@@ -76,7 +77,7 @@ Detailed Explanation:
   This provides a more detailed view of the draw events, treating each draw as a separate set of 7 random events instead of 1. */
 };
 
-struct ordinalBranch{
+struct OrdinalBranchNode{
 /* Struct to manage the interconnection between ordinal lists.
 Each ordinal list can reference elements in other lists through the _next listNode,
 and these references are managed by the 'ordinalBranch' structure. This structure
@@ -84,10 +85,10 @@ is part of a double-linked list and tracks the number of recorded events. When t
 events (sampleSize) reaches a certain threshold (_ordinalSampleSize), a new ordinal list can be instantiated.*/
 
 
-    ordinalListNode *listNode;  // Pointer to the head node of the ordinal list.
+    OrdinalStatisticNode *listNode;  // Pointer to the head node of the ordinal list.
     int sampleSize;             // Number of times this List recorded an event (draw events or opportunities).
-    ordinalBranch *_next;       // Pointer to the next branch in the double-linked list.
-    ordinalBranch *_previous;   // Pointer to the previous branch in the double-linked list.
+    OrdinalBranchNode *_next;       // Pointer to the next branch in the double-linked list.
+    OrdinalBranchNode *_previous;   // Pointer to the previous branch in the double-linked list.
 /*	end of struct
 
 Detailed Explanation:
@@ -154,11 +155,11 @@ public:
 
     // Calculates and records the statistical event for a specific ordinal position within the ordinal branches.
     // This function propagates updates through the branches and creates new branches if necessary.
-    void calculate_ordinal_event(int ordinance, ordinalBranch*&);
+    void calculate_ordinal_event(int ordinance, OrdinalBranchNode*&);
 
     // Records an opportunity for a specific ordinal position within the ordinal branches, 
     // particularly when the number wasn't drawn but could have been.
-    void record_ordinal_opportunity(int ordinance, ordinalBranch*&);
+    void record_ordinal_opportunity(int ordinance, OrdinalBranchNode*&);
 
     // Correlates data across ordinal branches, starting from the last branch and propagating statistical calculations (like averages) backwards.
     // Future versions may include more statistical metrics such as sigma and standard deviation.
@@ -166,11 +167,11 @@ public:
 
     // Calculates and records a draw event for a specific number, updating its statistics such as total times drawn and average.
     // Designed to be extendable for additional calculations in the future.
-    void calculate_draw_event(DrawNumberStatistics*&);
+    void calculate_draw_event(DrawStatisticNode*&);
 
     // Propagates statistical calculations through the ordinal branches, updating nodes and transferring final sums to the draw numbers.
     // Handles recursive propagation and ensures the correct statistical metrics are updated.
-    void propagate_statistical_tree(int ordinance, double ordinalSum, ordinalBranch*&);
+    void propagate_statistical_tree(int ordinance, double ordinalSum, OrdinalBranchNode*&);
 
     // Sorts the linked list of draw statistics based on the average value of each draw number.
     // Uses a bubble sort algorithm and is designed to be easily extended to sort by other metrics.
@@ -178,16 +179,40 @@ public:
 
     // Sorts the ordinal list within a given ordinal branch by average or other statistical metrics.
     // Currently sorts by average but can be extended to include other criteria.
-    void sort_ordinal_average(ordinalBranch*&);
+    void sort_ordinal_average(OrdinalBranchNode*&);
+
 
     // Initializes a linked list of ordinalListNode elements in sequential order, setting up the ordinal positions and default statistics.
     // Memory allocation is checked, and the list is terminated properly.
-    void initialize_ordinal_list(ordinalListNode*&);
+    void initialize_ordinal_list(OrdinalStatisticNode*&);
 
     // Loads the configuration from a file into the provided Config object.
     // Returns true if the configuration is successfully loaded, false otherwise.
     bool load_config(const string& configFilePath, Config&);
 
+    // Function to open and validate the draw history file, count the total number of draws,
+    // and perform initial validation checks on the draw data.
+    // This function ensures that the file is properly opened and each draw has the correct
+    // number of entries, and that the draw numbers are within the expected range.
+    // Returns an ifstream object that is positioned at the start of the file, ready for further processing.
+    // If the file cannot be opened or a validation error occurs, the function will handle the error and return an invalid ifstream object.
+    ifstream collect_census();
+
+    // Function to extract a draw from a line of text in the draw history file.
+    // Takes a string (line) as input and returns a DrawMatrix containing the parsed draw numbers.
+    DrawMatrix extract_draw_vector(const std::string&);
+
+    // Function to process a single draw vector, updating statistics and events.
+    // Takes a vector of integers (representing a single draw) as input.    
+    void process_draw_vector(const std::vector<int>&);
+
+    // Function to reset flags and other state indicators after processing a draw.
+    // This is typically used to reset the `isDrawn` flags in the draw statistics list.
+    void reset_flags(); 
+
+    // Function to collect the remaining draws for testing purposes.
+    // Reads from the specified draw index in the file and stores them in `_remainingDraws`.
+    void collect_remaining_draws(ifstream& file, int startDraw); 
 
 	bool validate_draw_combination(Card);
 	bool prime_number_check(Card);
@@ -205,15 +230,12 @@ public:
 	
    // Pointer to the start of the linked list that holds statistics for each draw number.
     // This list keeps track of various statistics like total times drawn, opportunities, and averages.
-    DrawNumberStatistics *_drawNumbersStart;
+    DrawStatisticNode *_drawTreeStart;
 
     // Pointer to the start of the linked list of ordinal branches.
     // Each branch contains a list of ordinal positions and related statistical data.
-    ordinalBranch *_ordinalBranchStart;
+    OrdinalBranchNode *_ordinalTreeStart;
 
-    // Stores the last draw event in the form of a Card object, which may contain information about the drawn numbers.
-    // This variable holds the most recent set of numbers drawn.
-    Card _lastDraw;
 
     // Pointer to the start of the linked list that holds valid combinations.
     // This list contains valid combinations of numbers or other relevant data, typically used for analysis.
@@ -221,7 +243,7 @@ public:
 
     // Tracks the total number of draw events that have been processed.
     // This counter is incremented each time a new draw is processed and is used for various calculations.
-    int _totalDrawEvents;
+    int _drawHistoryTotal;
 
     // Tracks the total number of valid combination cards that have been processed.
     // This variable is incremented as valid combinations are identified and added to the list.
@@ -230,6 +252,8 @@ public:
     // Tracks the total number of ordinal branch nodes in the linked list.
     // This counter helps in managing and navigating the structure of ordinal branches.
     int _ordinalBranchTotalNodes;
+
+   
 
     // Holds the file path for the draw history file, which contains past draw events.
     // This file is used to load historical draw data for analysis.
@@ -242,6 +266,31 @@ public:
     // Boolean flag to enable or disable debug mode.
     // When set to true, additional debug information is output to help trace the program's execution.
     bool _debugMode;
+
+    // Flag indicating whether the application is in test mode.
+    // If true, only a subset of draws will be processed, leaving the rest for testing.
+    bool _loadTest; 
+
+    // Flag indicating whether the initial seed of draw events has been completed.
+    // This is used to determine when to start calculating ordinal events.
+    bool _seeded; 
+
+    // Counter to track the total number of draw events processed.
+    // This includes all draws analyzed during the execution of the program.
+    int _totalEvents; 
+
+    // A matrix (vector of vectors) storing the draws reserved for testing.
+    // Each inner vector represents a single draw's ball numbers.
+    DrawMatrix _remainingDraws; 
+
+    // A matrix (vector of vectors) storing the most recent draws processed.
+    // Used to track and analyze the latest draw events.
+    DrawMatrix _lastDraw; 
+
+    // The number of draws to reserve for testing purposes.
+    // This value can be adjusted based on the needs of the test scenario.
+    int _testDrawCount = 100; 
+
 };
 
 
@@ -249,14 +298,15 @@ void Analyse::init_all() {
 // Function to initialize all necessary data structures and settings for the analysis.
 
     // Initialize the linked list for draw number statistics.
-    _drawNumbersStart = new DrawNumberStatistics;
-    if (!_drawNumbersStart) {
+    _drawTreeStart = new DrawStatisticNode;
+    if (!_drawTreeStart) {
         cerr << "[Error] Failed to allocate memory for _drawNumbersStart." << endl;
         return; // Consider more graceful error handling in production code.
     }
 
-    DrawNumberStatistics *currentDrawNumber = _drawNumbersStart;
+    DrawStatisticNode *currentDrawNumber = _drawTreeStart;
     int ballValue = 0;
+    int _totalEvents = 0;
 
     // Loop to initialize each draw number's statistics.
     while (ballValue < _drawRange) {
@@ -278,7 +328,7 @@ void Analyse::init_all() {
         }
 
         // Allocate memory for the next node in the list.
-        currentDrawNumber->_next = new DrawNumberStatistics;
+        currentDrawNumber->_next = new DrawStatisticNode;
         if (!currentDrawNumber->_next) {
             cerr << "[Error] Failed to allocate memory for the next DrawNumberStatistics node." << endl;
             currentDrawNumber->_next = nullptr;
@@ -293,18 +343,18 @@ void Analyse::init_all() {
     _totalValidCombinationCards = 0; // Initialize the count of valid combination cards.
 
     // Initialize the ordinal branch structure.
-    _ordinalBranchStart = new ordinalBranch;
+    _ordinalTreeStart = new OrdinalBranchNode;
     // Set initial values for the ordinal branch.
-    _ordinalBranchStart->sampleSize = 0;
-    _ordinalBranchStart->_previous = nullptr;
-    _ordinalBranchStart->_next = nullptr;
+    _ordinalTreeStart->sampleSize = 0;
+    _ordinalTreeStart->_previous = nullptr;
+    _ordinalTreeStart->_next = nullptr;
 	
-    _ordinalBranchStart->listNode = new ordinalListNode;
+    _ordinalTreeStart->listNode = new OrdinalStatisticNode;
     // Initialize the first ordinal list.
-    initialize_ordinal_list(_ordinalBranchStart->listNode);
+    initialize_ordinal_list(_ordinalTreeStart->listNode);
 
     // Initialize other relevant counters and flags.
-    _totalDrawEvents = 0;
+    _drawHistoryTotal = 0;
     _ordinalBranchTotalNodes = 1;
     _debugMode = true;
 }
@@ -316,8 +366,8 @@ void Analyse::display_draw_statistics() {
  for each draw number.*/
 
     // Start with the first draw number in the linked list.
-	DrawNumberStatistics* currentDraw;
-	currentDraw = _drawNumbersStart;
+	DrawStatisticNode* currentDraw;
+	currentDraw = _drawTreeStart;
 
     // Print the header for the statistics display.
     std::cerr << "Draw Statistics (sorted by average):" << std::endl;
@@ -344,8 +394,8 @@ void Analyse::display_ordinal_lists() {
 // and prints out the relevant information for each ordinal list at each level.
 
     // Start with the first ordinal branch in the linked list.
-    ordinalBranch* currentBranch;
-    currentBranch = _ordinalBranchStart;
+    OrdinalBranchNode* currentBranch;
+    currentBranch = _ordinalTreeStart;
     int OrdinalLevel = 1; // Track the rank of the ordinal branch list (starting from 1).
 
     // Iterate through the linked list of ordinal branches.
@@ -355,7 +405,7 @@ void Analyse::display_ordinal_lists() {
         std::cerr << "Ordinal Level " << OrdinalLevel << " sample size: " << currentBranch->sampleSize << " List:" << std::endl;
         
         // Start with the first ordinal list node in the current branch.
-        ordinalListNode* currentOrdinal = currentBranch->listNode;
+        OrdinalStatisticNode* currentOrdinal = currentBranch->listNode;
 
         // Iterate through the linked list of ordinal list nodes in the current branch.
         while (currentOrdinal != nullptr) {
@@ -383,13 +433,13 @@ void Analyse::sort_draws_average() {
    in ascending order of their average draw position. */
 
     bool swapped; // Flag to track if any swaps were made during the iteration.
-    DrawNumberStatistics *ptr1; // Pointer used to traverse the list.
-    DrawNumberStatistics *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
+    DrawStatisticNode *ptr1; // Pointer used to traverse the list.
+    DrawStatisticNode *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
 
     // Repeat the sorting process until no swaps are made (i.e., the list is sorted).
     do {
         swapped = false;
-        ptr1 = _drawNumbersStart; // Start from the beginning of the list.
+        ptr1 = _drawTreeStart; // Start from the beginning of the list.
 
         // Traverse the list until the last sorted element (lptr).
         while (ptr1->_next != lptr) {
@@ -416,7 +466,7 @@ void Analyse::sort_draws_average() {
     } while (swapped);
 }
 
-void Analyse::sort_ordinal_average(ordinalBranch*& Head) {
+void Analyse::sort_ordinal_average(OrdinalBranchNode*& Head) {
 /* Function to sort the ordinal list within a given ordinal branch based on the 'average' field.
 This function uses a modified bubble sort algorithm to arrange the ordinal list nodes
 in ascending order of their average probability values. */
@@ -425,8 +475,8 @@ in ascending order of their average probability values. */
     if (Head == nullptr) return;
 
     bool swapped; // Flag to track if any swaps were made during the iteration.
-    ordinalListNode *ptr1; // Pointer used to traverse the list.
-    ordinalListNode *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
+    OrdinalStatisticNode *ptr1; // Pointer used to traverse the list.
+    OrdinalStatisticNode *lptr = nullptr; // Pointer to mark the end of the unsorted portion of the list.
 
     // Repeat the sorting process until no swaps are made (i.e., the list is sorted).
     do {
@@ -457,7 +507,7 @@ in ascending order of their average probability values. */
     } while (swapped);
 }
 
-void Analyse::record_ordinal_opportunity(int ordinance, ordinalBranch*& Node){
+void Analyse::record_ordinal_opportunity(int ordinance, OrdinalBranchNode*& Node){
 /* Function to record an opportunity for a specific ordinal position (rank) in the linked ordinal branches.
 This is a recursive function that takes a rank position (ordinance) of a sorted list and increments the 
 opportunities count for that position if it could have been drawn but wasn't. 
@@ -467,8 +517,8 @@ ensuring that every relevant ordinal list node is updated across all levels.
 This function is called from within analyse_all_draws().*/
 
     // Initialize pointers to traverse the current branch and its ordinal list.
-    ordinalBranch* currentBranch = Node;          // Start with the provided branch (Node).
-    ordinalListNode* currentListNode = currentBranch->listNode;  // Start with the head of the ordinal list.
+    OrdinalBranchNode* currentBranch = Node;          // Start with the provided branch (Node).
+    OrdinalStatisticNode* currentListNode = currentBranch->listNode;  // Start with the head of the ordinal list.
     int listOrdinance = 1;  // This counter tracks the position within the current list.
 
     // Traverse through the ordinal list nodes in the current branch.
@@ -505,6 +555,64 @@ This function is called from within analyse_all_draws().*/
     }
 }
 
+void Analyse::process_draw_vector(const std::vector<int>& draw) {
+    DrawStatisticNode* listNumber; // Pointer to traverse the linked list of draw statistics.
+    int drawCardSlot = 0;          // Counter for the position within the current draw.
+    int drawListLocation = 0;      // Location in the draw statistics list.
+
+    // Process each ball number in the draw vector
+    for (const int& ballNumber : draw) {
+        _lastDraw.back()[drawCardSlot] = ballNumber; // Store the ball number in the current draw slot of the last draw in _lastDraw
+        if (_debugMode)
+            std::cout << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << std::endl;
+
+        listNumber = _drawTreeStart; // Start from the beginning of the draw statistics list
+        drawListLocation = 1;           // Location counter starts at 1
+
+        // Traverse the draw statistics list to update statistics for each draw number
+        while (listNumber != NULL) {
+            if (!listNumber->isDrawn) { // Process only if the number has not already been drawn in this draw
+                if (listNumber->drawNumber == ballNumber) 
+                {
+                    _totalEvents++; // Increment total draw events counter
+                    calculate_draw_event(listNumber); // Perform draw event calculations for the matched number
+
+                    // If seeding is complete, calculate ordinal events for the matched number
+                    if ( _seeded ) {
+                        calculate_ordinal_event(drawListLocation, _ordinalTreeStart);
+                    }
+
+                    if (_debugMode)
+                        std::cout << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << std::endl;
+                } 
+				else 
+				{
+                    listNumber->drawOpportunities++; // Increment opportunities for unmatched numbers
+
+                    // If seeding is complete, record ordinal opportunities for unmatched numbers
+                    if ( _seeded ) {
+                        record_ordinal_opportunity(drawListLocation, _ordinalTreeStart);
+                    }
+                }
+            }
+            listNumber = listNumber->_next; // Move to the next draw number in the list
+            drawListLocation++;
+        }
+        drawCardSlot++; // Move to the next slot in the draw
+    }
+
+    // Reset the isDrawn flag for all draw numbers after processing the current draw
+    reset_flags();
+
+    // Sort the draw statistics list based on the updated averages
+    sort_draws_average();
+
+    // If seeding is complete, sort the ordinal lists for further analysis
+    if ( _seeded ) {
+        sort_ordinal_lists();
+    }
+}
+
 void Analyse::analyse_all_draws(){
 /* Function to analyze all draw events from a historical draw file.
 This function processes each draw in the file, updates the draw statistics,
@@ -517,138 +625,59 @@ Suggested function breakdown:
 4. A function to update statistics and calculate probabilities for matched numbers.
 5. A function to reset flags and sort lists after processing each draw.*/
 
-    DrawNumberStatistics *listNumber;  // Pointer to traverse the linked list of draw statistics.
-    listNumber = _drawNumbersStart;    // Start from the head of the draw numbers list.
-    int drawCardSlot = 0;              // Counter for the position within the current draw.
-    int drawListLocation = 0;          // Location in the draw statistics list.
-    int ballNumber = 0;                // The current ball number being processed.
-    int ballsDrawn = 0;                // Count of balls drawn in a draw (not used in this snippet).
-    string drawDate = "";              // Variable to store the date of the draw.
-    string line;                       // String to hold each line read from the file.
+    DrawStatisticNode* listNumber; // Pointer to traverse the linked list of draw statistics.
+    int totalDraws = 0;            // Counter for the total number of draws processed.
+    int drawLimit;                 // Limit for the number of draws to process.
+    string line;                   // String to hold each line read from the file.
+    string drawDate = "";          // Variable to store the date of the draw (currently unused).
+    int drawSlot = 0;              // Counter for the position within the current draw.
 
-    // Open the draw history file with error checking.
-    ifstream file(_drawHistoryFile);
-    if (!file.is_open()) {
-        cerr << "[Error] Failed to open file: " << _drawHistoryFile << endl;
-        return;
+    // Open the draw history file and perform initial census validation checks.
+    ifstream file = collect_census();
+    if (!file.is_open()) return; // Exit if the file could not be opened.
+
+    // Determine the draw limit based on whether the program is in test mode.
+    // If in test mode (_loadTest is true), process all but the last 100 draws for testing purposes.
+    // Otherwise, process all available draws.
+    if (_loadTest)
+        drawLimit = _drawHistoryTotal - 100; 
+    else
+        drawLimit = _drawHistoryTotal;       
+
+    // Skip the header line of the CSV file to start processing the actual draw data.
+    getline(file, line);
+
+    // Read and process each line from the file until the end or the specified limit.
+    while (totalDraws < drawLimit) {
+        getline(file, line);
+        stringstream ss(line);
+
+        // Determine if the draw events should start affecting the ordinal list calculations.
+        if (!_seeded) {
+            if (totalDraws > _drawSampleSize)
+                _seeded = true;
+        }
+
+        // Extract the draw data into a DrawMatrix (vector of vectors).
+        DrawMatrix drawData = extract_draw_vector(line);
+
+        // If drawData is empty, skip this line and continue to the next one.
+        if (drawData.empty()) continue;
+
+        drawSlot = 0; // Reset the slot counter for the current draw.
+
+        // Process the draw data using the draw vector.
+        process_draw_vector(drawData[0]);
+
+        totalDraws++; // Increment the total draws counter.
     }
-    if (_debugMode)
-        cerr << "[Debug] Successfully opened file: " << _drawHistoryFile << endl;
 
-    // Skip the header line of the CSV file if present.
-    if (getline(file, line)) {
-        if (_debugMode)
-            cerr << "[Debug] Skipping header line: " << line << endl;
-    }
-
-    // TODO: Consider refactoring this loop into a separate function: process_draw_line()
-    // Read and process each line (draw event) from the file.
-    while (getline(file, line)) 
-    {
-        if (line.empty()) {
-            cerr << "[Warning] Skipping empty line in file." << endl;
-            continue;
-        }
-        stringstream ss(line); // Use stringstream to parse the line.
-
-        drawCardSlot = 0; // Reset the slot counter for each draw.
-
-        // Read the draw date.
-        if (!getline(ss, drawDate, ',')) {
-            cerr << "[Error] Failed to read draw date from line: " << line << endl;
-            continue;
-        }
-        
-        // TODO: Consider refactoring this loop into a separate function: process_draw_number()
-        // Process each ball number in the current draw.
-        while (getline(ss, line, ',')) // Parse each ball number in the draw.
-        {
-            try {
-                ballNumber = stoi(line); // Convert the string to an integer.
-            } catch (const invalid_argument& e) {
-                cerr << "[Error] Invalid ball number in line: " << line << endl;
-                continue;
-            }
-
-            // Check if we exceed the expected number of slots for a draw.
-            if (drawCardSlot >= _drawCardSize) {  // Assuming _drawCardSize is defined elsewhere.
-                cerr << "[Error] Exceeded maximum draw slots for date: " << drawDate << endl;
-                break;
-            }
-
-            // Record the ball number in the appropriate slot.
-            _lastDraw[drawCardSlot] = ballNumber;
-            if(_debugMode)
-                cerr << "[Debug] Ball " << ballNumber << " drawn in slot " << drawCardSlot << endl;
-
-            // Reset list traversal variables.
-            listNumber = _drawNumbersStart; // Start from the beginning of the draw statistics list.
-            drawListLocation = 1; // Location counter starts at 1.
-
-            // TODO: Consider refactoring this loop into two separate functions:
-            // 1. update_matched_number_statistics() - for when the number matches.
-            // 2. record_opportunity_for_unmatched() - for when the number doesn't match.
-            // Traverse the draw statistics list to update each draw number's stats.
-            while(listNumber != NULL)
-            {
-                // If this number hasn't been drawn yet, process it.
-                if (!listNumber->isDrawn)
-                {
-                    // Check if the current ball matches the draw number in the list.
-                    if (listNumber->drawNumber == ballNumber)
-                    {
-                        _totalDrawEvents++; // Increment total draw events counter.
-                        
-                        // Perform draw event calculations for the matched number.
-                        calculate_draw_event(listNumber);
-                        
-                        // If enough draws have occurred, calculate ordinal events.
-                        if (_totalDrawEvents > _drawSampleSize)
-                            calculate_ordinal_event(drawListLocation, _ordinalBranchStart);
-                        
-                        if(_debugMode)
-                            cerr << "[Debug] Ball " << ballNumber << " matches DrawNumber at location " << drawListLocation << endl;
-                    } 
-                    else 
-                    {
-                        // For unmatched numbers, increment their opportunities.
-                        listNumber->drawOpportunities++;
-                        
-                        // Record ordinal opportunities for unmatched numbers.
-                        if (_totalDrawEvents > _drawSampleSize) {
-                            record_ordinal_opportunity(drawListLocation, _ordinalBranchStart);
-                        }
-                    }
-                }
-                // Move to the next draw number in the list.
-                listNumber = listNumber->_next;
-                drawListLocation++;
-            } 
-            drawCardSlot++; // Move to the next slot in the draw.
-        }
-        
-        // TODO: Refactor into a function to reset flags and sort the lists: reset_and_sort_after_draw()
-        // Reset the isDrawn flag for all draw numbers for the next draw.
-        listNumber = _drawNumbersStart;
-        while (listNumber != NULL)
-        {
-            listNumber->isDrawn = false; // Reset the flag.
-            listNumber = listNumber->_next;
-        }
-
-        // Sort the draw statistics list based on the updated averages.
-        sort_draws_average();
-
-        // If the total number of draw events exceeds the sample size, 
-        // sort the ordinal lists and perform any necessary operations.
-        if (_totalDrawEvents > _drawSampleSize){
-            sort_ordinal_lists();
-        }
-    }
+    // Collect the remaining draws for testing.
+    collect_remaining_draws(file, totalDraws);
 
     // Close the file after processing all draws.
     file.close();
-    cerr << "[Debug] Finished processing all draws." << endl;
+    std::cout << "[Debug] Finished processing all draws." << std::endl;
 }
 
 void Analyse::correlate_data(){
@@ -657,9 +686,9 @@ This function propagates statistical calculations (currently the average) from t
 back through the previous branches. Future expansions will likely include other statistical metrics
 such as sigma, standard deviation, and others, requiring updates to the data structures.*/
 
-    ordinalBranch* currentBranch;        // Pointer to traverse the ordinal branches.
-    ordinalListNode* currentListNode;    // Pointer to traverse the ordinal list nodes within a branch.
-    currentBranch = _ordinalBranchStart;
+    OrdinalBranchNode* currentBranch;        // Pointer to traverse the ordinal branches.
+    OrdinalStatisticNode* currentListNode;    // Pointer to traverse the ordinal list nodes within a branch.
+    currentBranch = _ordinalTreeStart;
 
     // Traverse to the last ordinal branch in the linked list.
     while (currentBranch->_next != nullptr){
@@ -680,13 +709,13 @@ such as sigma, standard deviation, and others, requiring updates to the data str
     }
 }
 
-void Analyse::propagate_statistical_tree(int ordinance, double ordinalSum, ordinalBranch*& branchNode){
+void Analyse::propagate_statistical_tree(int ordinance, double ordinalSum, OrdinalBranchNode*& branchNode){
 /* Function to propagate statistical calculations (currently ordinal sum) through the ordinal branches.
 This function works recursively, starting from a given branch node and moving backward through the linked list
 of branches until it reaches the base branch node, which references the draw list sorted by averages.
 At each level, the function updates the ordinal chance with the cumulative sum of averages.*/
 
-    ordinalListNode* currentListNode;  // Pointer to traverse the ordinal list nodes within the current branch.
+    OrdinalStatisticNode* currentListNode;  // Pointer to traverse the ordinal list nodes within the current branch.
     currentListNode = branchNode->listNode;  // Start with the head of the ordinal list in the given branch.
 
     int listOrdinance = 1;  // Counter to track the position within the ordinal list.
@@ -709,8 +738,8 @@ At each level, the function updates the ordinal chance with the cumulative sum o
     }
     // If we've reached the base branch node (no previous branch), transfer the final cumulative sum to the draw numbers.
     else {
-        DrawNumberStatistics* drawList;  // Pointer to traverse the draw list.
-        drawList = _drawNumbersStart;  // Start at the head of the draw list.
+        DrawStatisticNode* drawList;  // Pointer to traverse the draw list.
+        drawList = _drawTreeStart;  // Start at the head of the draw list.
 
         // Traverse to the draw number that corresponds to the final ordinance position.
         listOrdinance = 1;
@@ -741,12 +770,65 @@ Explanation of the Function:
    its ordinal position in various sorted lists.*/
 }
 
+void Analyse::collect_remaining_draws(ifstream& file, int startDraw) {
+    string line;               // String to hold each line read from the file.
+    int currentDraw = 0;       // Counter to track the current draw being processed.
+
+    // Clear the _remainingDraws vector to ensure no residual data from previous operations.
+    _remainingDraws.clear();
+
+    // Skip over draws until reaching the specified startDraw.
+    // This loop continues until currentDraw equals startDraw, effectively skipping earlier draws.
+    while (currentDraw < startDraw && getline(file, line)) {
+        currentDraw++;
+    }
+
+    // Collect the remaining draws starting from the specified draw index.
+    // The loop continues until either the end of the file is reached or the desired number of test draws (_testDrawCount) is collected.
+    while (getline(file, line) && _remainingDraws.size() < _testDrawCount) {
+        stringstream ss(line);    // Use a stringstream to parse the comma-separated values in the line.
+        string drawDate;          // Variable to store the draw date (which will be skipped).
+        std::vector<int> draw;    // Vector to hold the individual ball numbers for the current draw.
+
+        // Attempt to read and skip the draw date, which is the first value in the line.
+        // If the draw date cannot be read, output an error message and skip to the next line.
+        if (!getline(ss, drawDate, ',')) {
+            cerr << "[Error] Failed to read draw date from line: " << line << endl;
+            continue;
+        }
+
+        // Collect and convert each ball number in the draw from a string to an integer.
+        // Add each valid ball number to the draw vector.
+        while (getline(ss, line, ',')) {
+            try {
+                draw.push_back(stoi(line)); // Convert the string to an integer and add it to the draw vector.
+            } catch (const invalid_argument& e) {
+                // If the conversion fails, output an error message and skip the rest of the line.
+                cerr << "[Error] Invalid ball number in line: " << line << endl;
+                break;
+            }
+        }
+
+        // After processing the line, check if the correct number of ball numbers were collected.
+        // If the correct number of balls is present, add the draw to _remainingDraws.
+        if (draw.size() == _drawCardSize) {
+            _remainingDraws.push_back(draw); // Add the fully processed draw to the _remainingDraws vector.
+        } else {
+            // If the number of balls is incorrect, output an error message and do not add the draw.
+            cerr << "[Error] Incorrect number of balls in draw: " << line << endl;
+        }
+    }
+
+    // Output a debug message indicating how many draws were collected for testing.
+    cout << "[Debug] Collected " << _remainingDraws.size() << " draws for testing." << endl;
+}
+
 void Analyse::sort_ordinal_lists(){
 /* Function to sort all ordinal lists within the linked ordinalBranch structure.
 Currently, this function sorts each list by the average values, but it is designed 
 with the intention to support sorting by other statistical metrics in the future.*/
 
-    ordinalBranch *Current = _ordinalBranchStart;  // Start at the head of the ordinal branch list.
+    OrdinalBranchNode *Current = _ordinalTreeStart;  // Start at the head of the ordinal branch list.
     
     // Traverse through each ordinal branch in the linked list.
     while(Current != NULL)
@@ -770,16 +852,14 @@ Explanation of the Function:
    - `sort_ordinal_by_custom_metric(Current, customMetricFunction)`: Sort by a custom metric defined by a function pointer or lambda expression.*/
 }
 
-
-
-void Analyse::calculate_ordinal_event(int ordinance, ordinalBranch*& Node){
+void Analyse::calculate_ordinal_event(int ordinance, OrdinalBranchNode*& Node){
 /* Function to calculate and record the statistical event for a specific ordinal position (ordinance).
 This function updates the statistical data (e.g., landed total, opportunities, average) for a drawn number 
 within the ordinal lists. It propagates these updates through the hierarchy of ordinal branches.
 If a branch's sample size exceeds a predefined threshold, a new ordinal branch is created.*/
 
     // Start at the head of the ordinal list in the current branch.
-    ordinalListNode* currentListNode = Node->listNode;
+    OrdinalStatisticNode* currentListNode = Node->listNode;
 
     int OrdinalListLocation = 1; // Counter to track the location within the ordinal list.
     
@@ -809,7 +889,7 @@ If a branch's sample size exceeds a predefined threshold, a new ordinal branch i
                 _ordinalBranchTotalNodes++; // Track the total number of ordinal branches.
                 
                 // Create a new ordinal branch.
-                Node->_next = new ordinalBranch;
+                Node->_next = new OrdinalBranchNode;
                 Node->_next->sampleSize = 0;
                 Node->_next->_next = nullptr;
                 Node->_next->_previous = Node;
@@ -846,19 +926,19 @@ Explanation of the Function:
 TODO: Consider extending this function to handle additional statistical metrics (e.g., sigma, standard deviation, etc.) and update the comments accordingly.*/
 }
 
-void Analyse::initialize_ordinal_list(ordinalListNode*& Head){
+void Analyse::initialize_ordinal_list(OrdinalStatisticNode*& Head){
 /* Function to initialize a linked list of 49 ordinalListNode elements in sequential order.
 Each node in the list represents an ordinal position and is initialized with default values. */
 
     // Step 1: Initialize the head node of the linked list.
-    Head = new ordinalListNode;
+    Head = new OrdinalStatisticNode;
     if (!Head) {
         cerr << "[Error] Memory allocation failed for the head node." << endl;
         return;
     }
 
     // Step 2: Pointer to traverse and build the list.
-    ordinalListNode* currentList = Head;
+    OrdinalStatisticNode* currentList = Head;
 
     // Step 3: Initialize each node in the list with sequential ordinal values.
     for (int i = 1; i <= 49; ++i) {
@@ -871,7 +951,7 @@ Each node in the list represents an ordinal position and is initialized with def
 
         // Step 4: Create the next node if we're not at the last element.
         if (i < 49) {
-            currentList->_next = new ordinalListNode;
+            currentList->_next = new OrdinalStatisticNode;
             if (!currentList->_next) {
                 cerr << "[Error] Memory allocation failed at position " << i << endl;
                 break;  // Stop the loop if memory allocation fails.
@@ -901,7 +981,15 @@ Explanation of the Function:
 - **Efficiency:** This approach avoids the overhead of shuffling, making the function more efficient for cases where a simple ordered list is sufficient.*/
 }
 
-void Analyse::calculate_draw_event(DrawNumberStatistics*& Number){
+void Analyse::reset_flags(){
+    DrawStatisticNode* listNumber = _drawTreeStart;
+    while (listNumber != NULL) {
+        listNumber->isDrawn = false;
+        listNumber = listNumber->_next;
+    }
+}
+
+void Analyse::calculate_draw_event(DrawStatisticNode*& Number){
 /* Function to record a draw event for a specific number.
 This function updates key statistics for the number being drawn, such as the total times drawn,
 draw opportunities, and average. It also marks the number as drawn and records when it was last drawn.
@@ -919,7 +1007,7 @@ The function is designed to be extendable, allowing for additional calculations 
 
     // Record the event number when this number was last drawn.
     // This value is set to the current total draw events in the system.
-    Number->lastDrawn = _totalDrawEvents;
+    Number->lastDrawn = _drawHistoryTotal;
 
     // Mark the number as drawn in the current draw.
     Number->isDrawn = true;
@@ -929,6 +1017,38 @@ Potential future calculations might include:
 - Update sigma (standard deviation) based on the new draw event.
 - Calculate and update any custom metrics that need to be tracked for each draw.
 - Log or record additional metadata related to the draw event, such as draw date or position in the draw.*/
+}
+
+DrawMatrix extract_draw_vector(const std::string& line) {
+    DrawMatrix drawData;              // Initialize an empty DrawMatrix to store the draw data.
+    std::vector<int> draw;            // Vector to hold the individual ball numbers for the current draw.
+    std::stringstream ss(line);       // Create a stringstream to parse the input line.
+    std::string drawDate;             // Variable to store the draw date (which will be skipped).
+    std::string ballStr;              // Variable to hold each ball number as a string.
+
+    // Attempt to read and skip the draw date, which is the first value in the line.
+    // If the draw date cannot be read, output an error message and return an empty DrawMatrix.
+    if (!getline(ss, drawDate, ',')) {
+        std::cerr << "[Error] Failed to read draw date from line: " << line << std::endl;
+        return drawData; // Return an empty DrawMatrix if there's an error
+    }
+
+    // Process each ball number in the draw by reading the remaining values in the line.
+    while (getline(ss, ballStr, ',')) {
+        try {
+            int ballNumber = std::stoi(ballStr); // Convert the string representation of the ball number to an integer.
+            draw.push_back(ballNumber);          // Add the ball number to the draw vector.
+        } catch (const std::invalid_argument&) {
+            // If the conversion fails (e.g., the value is not a valid integer), output an error message
+            // and return an empty DrawMatrix, as this indicates invalid data.
+            std::cerr << "[Error] Invalid ball number in line: " << ballStr << std::endl;
+            return drawData; // Return an empty DrawMatrix if there's an error
+        }
+    }
+
+    // After successfully processing all ball numbers, add the draw vector to the DrawMatrix.
+    drawData.push_back(draw);
+    return drawData; // Return the populated DrawMatrix.
 }
 
 bool Analyse::validate_draw_combination(Card PossibleCombinationCard)
@@ -992,6 +1112,7 @@ bool Analyse::prime_number_check(Card num)
 	}
 	return false;
 }
+
 void Analyse::create_all_combinations()
 {
 	//This function creates every draw combination and validates them for use in this program.
@@ -1047,6 +1168,91 @@ void Analyse::create_all_combinations()
     cerr << "Generated " << TotalGeneratedCombinations << ":" << '\n';
 	fclose(CombinationOutputFile);
 }
+
+ifstream Analyse::collect_census() {
+
+    // Open the draw history file and check for errors
+    ifstream file(_drawHistoryFile);
+    if (!file.is_open()) {
+        cout << "[Error] Failed to open file: " << _drawHistoryFile << endl;
+        return file;
+    }
+
+    string line;                    // String to hold each line read from the file
+    int totalDraws = 0;             // Counter for the total number of valid draws processed
+    int expectedNumbersPerDraw = _drawCardSize;  // Expected number of ball numbers per draw
+    int minNumber = 1;              // Minimum valid number for a ball in the draw
+    int maxNumber = _drawRange;     // Maximum valid number for a ball in the draw (using _drawRange)
+
+    // Regex to validate date format YYYY-MM-DD
+    regex datePattern(R"(\d{4}-\d{2}-\d{2})");
+
+    // Skip the header line of the CSV file if present
+    if (getline(file, line)) {
+        // Header line skipped
+    }
+
+    // Process each line (draw) in the file
+    while (getline(file, line)) {
+        if (line.empty()) {
+            cout << "[Warning] Skipping empty line in file." << endl;
+            continue;
+        }
+
+        stringstream ss(line);
+        string drawDate;
+        int ballNumber;
+        int numberCount = 0;
+
+        // Read the draw date
+        if (!getline(ss, drawDate, ',')) {
+            cout << "[Error] Failed to read draw date from line: " << line << endl;
+            continue;
+        }
+
+        // Validate the date format using the regex pattern
+        if (!regex_match(drawDate, datePattern)) {
+            cout << "[Error] Invalid date format: " << drawDate << endl;
+            continue;
+        }
+
+        // Validate each ball number in the draw
+        while (getline(ss, line, ',')) {
+            try {
+                ballNumber = stoi(line); // Convert the string to an integer
+            } catch (const invalid_argument&) {
+                cout << "[Error] Invalid ball number in line: " << line << endl;
+                break;
+            }
+
+            // Check if the ball number is within the valid range
+            if (ballNumber < minNumber || ballNumber > maxNumber) {
+                cout << "[Error] Ball number out of range (" << minNumber << "-" << maxNumber << "): " << ballNumber << endl;
+                break;
+            }
+
+            numberCount++;
+        }
+
+        // Validate that the correct number of balls are present in the draw
+        if (numberCount != expectedNumbersPerDraw) {
+            cout << "[Error] Incorrect number of balls in draw for date: " << drawDate << " - Expected " << expectedNumbersPerDraw << " but found " << numberCount << endl;
+            continue;
+        }
+
+        totalDraws++; // Increment the counter for total valid draws
+    }
+
+    // Store the total count of valid draws for further processing
+    _drawHistoryTotal = totalDraws;
+    cout << "[Info] Total valid draws found: " << totalDraws << endl;
+
+    // Clear any EOF flags and rewind the file for further processing
+    file.clear();
+    file.seekg(0);
+    return file; // Return the file handle for further processing
+}
+
 bool load_config(const string& configFilePath, Config& config) {
     ifstream configFile(configFilePath);
     if (!configFile.is_open()) {
